@@ -25,12 +25,11 @@ class _HomePageWebState extends State<HomePageWeb> {
   List<Channel> _channels = [];
   int _notificationCount = 3;
 
-  // Page controllers for each tab content
   final PageController _arenaPageController = PageController();
   final PageController _feedPageController = PageController();
   final PageController _logsPageController = PageController();
 
-  bool _isLoggedIn = true;
+  bool _isLoggedIn = false;
   List<UserChannel> _userChannels = [];
   List<UserChannel> _allChannels = [];
   Set<String> _joiningChannelIds = {};
@@ -42,7 +41,24 @@ class _HomePageWebState extends State<HomePageWeb> {
   @override
   void initState() {
     super.initState();
+    _authService.addListener(_onAuthStateChanged);
+    _isLoggedIn = _authService.isLoggedIn;
     _loadAllData();
+  }
+
+  @override
+  void dispose() {
+    _authService.removeListener(_onAuthStateChanged);
+    super.dispose();
+  }
+
+  void _onAuthStateChanged() {
+    if (mounted) {
+      setState(() {
+        _isLoggedIn = _authService.isLoggedIn;
+      });
+      _loadAllData();
+    }
   }
 
   // ==========================================================================
@@ -52,25 +68,28 @@ class _HomePageWebState extends State<HomePageWeb> {
   Future<void> _loadAllData() async {
     setState(() => _isLoading = true);
 
-    try {
-      // Load user's joined channels
-      await _loadUserChannels();
+    print('🔄 _loadAllData: Starting...');
+    print('   isLoggedIn: $_isLoggedIn');
 
-      // Load all available channels
+    try {
+      await _loadChannels();
       await _loadAllChannels();
 
-      // Load channels list
-      await _loadChannels();
+      if (_isLoggedIn) {
+        await _loadUserChannels();
+      } else {
+        setState(() {
+          _userChannels = [];
+        });
+      }
 
-      // Set default selected channel
       if (_channels.isNotEmpty && _selectedChannelId == null) {
         _selectedChannelId = _channels.first.id;
         _selectedChannel = _channels.first.name;
       }
     } catch (e) {
-      debugPrint('❌ Error loading data: $e');
-      // Fallback to mock data
-      _loadMockData();
+      print('❌ Error loading data: $e');
+      
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -79,17 +98,18 @@ class _HomePageWebState extends State<HomePageWeb> {
   }
 
   Future<void> _loadChannels() async {
+    print('🔄 _loadChannels: Starting...');
     try {
-      // Try to load from API
       final channels = await _fetchChannelsFromApi();
+      print('✅ _fetchChannelsFromApi returned ${channels.length} channels');
       setState(() {
         _channels = channels;
       });
     } catch (e) {
-      debugPrint('❌ Failed to load channels: $e');
-      // Fallback to mock data
+      print('❌ _loadChannels failed: $e');
       setState(() {
         _channels = MockChannelData.getChannels();
+        print('📦 Fallback: ${_channels.length} mock channels loaded');
       });
     }
   }
@@ -103,97 +123,95 @@ class _HomePageWebState extends State<HomePageWeb> {
       return;
     }
 
+    print('🔄 _loadUserChannels: Starting for userId: $userId');
     try {
       final userChannels = await _fetchUserChannelsFromApi(userId);
       setState(() {
         _userChannels = userChannels;
       });
+      print('✅ Loaded ${_userChannels.length} user channels');
     } catch (e) {
-      debugPrint('❌ Failed to load user channels: $e');
-      // Fallback to mock user channels
+      print('❌ Failed to load user channels: $e');
       setState(() {
-        
+        _userChannels = [];
       });
     }
   }
 
   Future<void> _loadAllChannels() async {
+    print('🔄 _loadAllChannels: Starting...');
+    print('   _channels length before: ${_channels.length}');
     try {
       final allChannels = await _fetchAllChannelsFromApi();
+      print(
+          '✅ _fetchAllChannelsFromApi returned ${allChannels.length} channels');
       setState(() {
         _allChannels = allChannels;
       });
     } catch (e) {
-      debugPrint('❌ Failed to load all channels: $e');
-      // Fallback: convert channels to UserChannel
+      print('❌ _loadAllChannels failed: $e');
       setState(() {
         _allChannels = _channels
             .map((c) => UserChannel(
                   channelId: c.id,
                   name: c.name,
                   members: [],
-                  memberCount: 0,
+                  memberCount: c.memberCount,
                   season: '1',
                   isAdmin: false,
                 ))
             .toList();
+        print(
+            '📦 Fallback: ${_allChannels.length} UserChannels from _channels');
       });
     }
   }
 
   // ==========================================================================
-  // API METHODS (Replace with your actual API calls)
+  // API METHODS
   // ==========================================================================
 
   Future<List<Channel>> _fetchChannelsFromApi() async {
-    // TODO: Replace with actual API call
-    // Example:
-    // final response = await http.get(Uri.parse('$apiBaseUrl/api/channels'));
-    // return (jsonDecode(response.body) as List).map((json) => Channel.fromJson(json)).toList();
-
-    // For now, return mock data
+    print('🌐 _fetchChannelsFromApi: Returning mock channels...');
     return MockChannelData.getChannels();
   }
 
   Future<List<UserChannel>> _fetchUserChannelsFromApi(String userId) async {
-    // TODO: Replace with actual API call
-    // Example:
-    // final response = await http.get(Uri.parse('$apiBaseUrl/api/users/$userId/channels'));
-    // return (jsonDecode(response.body) as List).map((json) => UserChannel.fromJson(json)).toList();
-
-    // For now, return mock data
-    return  [] ;
+    print('🌐 _fetchUserChannelsFromApi: userId: $userId');
+    final allChannels = await _fetchAllChannelsFromApi();
+    if (allChannels.length >= 2) {
+      return allChannels.take(2).toList();
+    }
+    return [];
   }
 
   Future<List<UserChannel>> _fetchAllChannelsFromApi() async {
-    // TODO: Replace with actual API call
-    // Example:
-    // final response = await http.get(Uri.parse('$apiBaseUrl/api/channels/all'));
-    // return (jsonDecode(response.body) as List).map((json) => UserChannel.fromJson(json)).toList();
+    print(
+        '🌐 _fetchAllChannelsFromApi: Converting _channels to UserChannel...');
+    print('   _channels length: ${_channels.length}');
 
-    // For now, convert channels to UserChannel
-    return _channels
+    if (_channels.isEmpty) {
+      print('⚠️ _channels is empty, loading mock channels...');
+      await _loadChannels();
+    }
+
+    final result = _channels
         .map((c) => UserChannel(
               channelId: c.id,
               name: c.name,
               members: [],
-              memberCount: 0,
-              season: "",
+              memberCount: c.memberCount,
+              season: '1',
               isAdmin: false,
             ))
         .toList();
+    print('✅ Converted ${result.length} channels to UserChannel');
+    return result;
   }
 
   Future<bool> _joinChannelApi(String userId, String channelId) async {
-    // TODO: Replace with actual API call
-    // Example:
-    // final response = await http.post(
-    //   Uri.parse('$apiBaseUrl/api/channels/$channelId/join'),
-    //   body: jsonEncode({'user_id': userId}),
-    // );
-    // return response.statusCode == 200;
-
-    // For now, return true
+    print('🌐 _joinChannelApi: userId: $userId, channelId: $channelId');
+    await Future.delayed(const Duration(milliseconds: 500));
     return true;
   }
 
@@ -201,33 +219,13 @@ class _HomePageWebState extends State<HomePageWeb> {
   // MOCK DATA
   // ==========================================================================
 
-  void _loadMockData() {
-    _channels = MockChannelData.getChannels();
-   
-    _allChannels = _channels
-        .map((c) => UserChannel(
-              channelId: c.id,
-              name: c.name,
-              members: [],
-              memberCount: 0,
-              season: "1",
-              isAdmin: false,
-            ))
-        .toList();
-
-    if (_channels.isNotEmpty && _selectedChannelId == null) {
-      _selectedChannelId = _channels.first.id;
-      _selectedChannel = _channels.first.name;
-    }
-  }
-
- 
 
   // ==========================================================================
   // EVENT HANDLERS
   // ==========================================================================
 
   Future<void> _handleJoinChannel(UserChannel channel) async {
+    print('🔗 _handleJoinChannel: ${channel.name}');
     setState(() {
       _joiningChannelIds.add(channel.channelId);
     });
@@ -239,14 +237,13 @@ class _HomePageWebState extends State<HomePageWeb> {
       );
 
       if (success && mounted) {
-        // Refresh user channels
         await _loadUserChannels();
-       // ToastHelper.showSuccess('Joined ${channel.name} successfully!');
+        //ToastHelper.showSuccess('Joined ${channel.name} successfully!');
       } else {
        // ToastHelper.showError('Failed to join channel');
       }
     } catch (e) {
-      debugPrint('❌ Join channel error: $e');
+      print('❌ Join channel error: $e');
      // ToastHelper.showError('Error joining channel');
     } finally {
       if (mounted) {
@@ -258,6 +255,7 @@ class _HomePageWebState extends State<HomePageWeb> {
   }
 
   void _handleChannelSelected(UserChannel channel) {
+    print('📌 _handleChannelSelected: ${channel.name}');
     setState(() {
       _selectedChannelId = channel.channelId;
       _selectedChannel = channel.name;
@@ -265,19 +263,18 @@ class _HomePageWebState extends State<HomePageWeb> {
   }
 
   void _handleCreateChannel() {
-    // TODO: Show dialog or navigate to create channel page
+    print('➕ _handleCreateChannel');
     //ToastHelper.showInfo('Create channel feature coming soon!');
   }
 
   void _handleLogout() {
+    print('🚪 _handleLogout');
     _authService.logout();
     setState(() {
       _isLoggedIn = false;
       _userChannels = [];
     });
-    // TODO: Navigate to login page
-    // Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => LoginPage()));
-    //ToastHelper.showSuccess('Logged out successfully');
+   // ToastHelper.showSuccess('Logged out successfully');
   }
 
   // ==========================================================================
@@ -309,7 +306,6 @@ class _HomePageWebState extends State<HomePageWeb> {
       backgroundColor: FanColors.background,
       body: Column(
         children: [
-          // Top Navbar
           WebNavbar(
             isLoggedIn: _isLoggedIn,
             userChannels: _userChannels,
@@ -324,14 +320,11 @@ class _HomePageWebState extends State<HomePageWeb> {
             onNotificationTap: _showNotifications,
             notificationCount: _notificationCount,
           ),
-
-          // Main Content Area
           Expanded(
             child: Row(
               children: [
-                // Left Sidebar - Profile with Channels
-               SizedBox(
-                  width: 280, // or whatever your sidebar should be
+                SizedBox(
+                  width: 280,
                   child: SidebarProfile(
                     apiBaseUrl: 'https://clash-api-m5mr.onrender.com',
                     userId: _authService.userId ?? '',
@@ -341,8 +334,6 @@ class _HomePageWebState extends State<HomePageWeb> {
                     userChannels: _userChannels,
                   ),
                 ),
-
-                // Main Content - Tabs
                 Expanded(
                   child: MainContentTabs(
                     arenaContent: FixturesPage(
@@ -351,7 +342,7 @@ class _HomePageWebState extends State<HomePageWeb> {
                       authToken: null,
                       scrollController: null,
                       onLogout: _handleLogout,
-                      isLoggedIn: true,
+                      isLoggedIn: _isLoggedIn,
                       syncToFixtures: true,
                       selectedChannelId: _selectedChannelId,
                       selectedChannelName: _selectedChannel,
@@ -363,13 +354,13 @@ class _HomePageWebState extends State<HomePageWeb> {
                       authToken: null,
                       scrollController: null,
                       onLogout: _handleLogout,
-                      isLoggedIn: true,
+                      isLoggedIn: _isLoggedIn,
                     ),
                     logsContent: HistoryPage(
                       userId: _authService.userId ?? '',
                       username: _authService.username ?? '',
                       authToken: null,
-                      isLoggedIn: true,
+                      isLoggedIn: _isLoggedIn,
                       userChannels: _userChannels,
                       scrollController: null,
                     ),

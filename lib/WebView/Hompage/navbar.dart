@@ -4,19 +4,17 @@ import '../../pages/fan_Funzy_design.dart';
 import '../../models/user_channel.dart';
 
 /// Funspot brand gradient — deep emerald → jade → gold accent.
-/// Gives the navbar a premium, "podium" feel (olympiad-inspired)
-/// while staying rooted in the Funspot green identity.
 class FunspotGradients {
   static const List<Color> navbar = [
-    Color(0xFF0B3D2E), // deep forest
-    Color(0xFF10583F), // emerald
-    Color(0xFF1C7A52), // jade
+    Color(0xFF0B3D2E),
+    Color(0xFF10583F),
+    Color(0xFF1C7A52),
   ];
 
   static const List<Color> logo = [
-    Color(0xFF34D399), // mint
-    Color(0xFF059669), // emerald
-    Color(0xFF065F46), // deep green
+    Color(0xFF34D399),
+    Color(0xFF059669),
+    Color(0xFF065F46),
   ];
 
   static const List<Color> gold = [
@@ -33,22 +31,15 @@ class FunspotGradients {
 
 class WebNavbar extends StatelessWidget {
   final bool isLoggedIn;
-
-  // Channels the user actually belongs to.
   final List<UserChannel> userChannels;
-
-  // Browsable channels (only relevant when logged out, or channels < max).
   final List<UserChannel> allChannels;
-
   final String? selectedChannelId;
   final Set<String> joiningChannelIds;
   final int maxChannels;
 
-  final ValueChanged<UserChannel>
-      onChannelSelected; // logged-in tap -> leaderboard/select
-  final ValueChanged<UserChannel>
-      onJoinChannel; // logged-out / not-yet-member tap -> join
-  final VoidCallback onCreateChannel; // "+" chip
+  final ValueChanged<UserChannel> onChannelSelected;
+  final ValueChanged<UserChannel> onJoinChannel;
+  final VoidCallback onCreateChannel;
 
   final VoidCallback onMenuTap;
   final VoidCallback onNotificationTap;
@@ -91,7 +82,7 @@ class WebNavbar extends StatelessWidget {
         ],
         border: const Border(
           bottom: BorderSide(
-            color: Color(0x33FFD166), // faint gold hairline — podium accent
+            color: Color(0x33FFD166),
             width: 1,
           ),
         ),
@@ -101,10 +92,10 @@ class WebNavbar extends StatelessWidget {
         children: [
           _buildLogo(),
           const SizedBox(width: 32),
-          Expanded(child: _buildChannelSection(context)),
-          const SizedBox(width: 24),
           _buildSearch(),
-          const SizedBox(width: 20),
+          const SizedBox(width: 24),
+          Expanded(child: _buildChannelSection(context)),
+          const SizedBox(width: 16),
           _buildNotificationIcon(),
           const SizedBox(width: 16),
           _buildAvatar(),
@@ -114,7 +105,7 @@ class WebNavbar extends StatelessWidget {
   }
 
   // ==========================================================================
-  // LOGO
+  // LOGO — circular with border
   // ==========================================================================
   Widget _buildLogo() {
     return Row(
@@ -123,33 +114,18 @@ class WebNavbar extends StatelessWidget {
           width: 42,
           height: 42,
           decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: FunspotGradients.logo,
-            ),
-            borderRadius: BorderRadius.circular(13),
+            shape: BoxShape.circle,
             border: Border.all(
-              color: const Color(0xFFFFD166).withValues(alpha: 0.55),
-              width: 1.2,
+              color: Colors.white.withValues(alpha: 0.16),
+              width: 1,
             ),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFF34D399).withValues(alpha: 0.45),
-                blurRadius: 14,
-                offset: const Offset(0, 4),
-              ),
-            ],
           ),
-          child: const Center(
-            child: Text(
-              'F',
-              style: TextStyle(
-                fontSize: 21,
-                fontWeight: FontWeight.w800,
-                color: Colors.white,
-                letterSpacing: 0.2,
-              ),
+          child: const CircleAvatar(
+            backgroundColor: Color(0xFF0B3D2E),
+            child: Icon(
+              Icons.sports_soccer,
+              color: Color(0xFF34D399),
+              size: 24,
             ),
           ),
         ),
@@ -198,18 +174,15 @@ class WebNavbar extends StatelessWidget {
   }
 
   // ==========================================================================
-  // CHANNEL SECTION — mirrors HomePage._buildRow2Content()
+  // CHANNEL SECTION
   // ==========================================================================
   Widget _buildChannelSection(BuildContext context) {
-    // Case 1: not logged in, OR logged in with zero channels -> browse + join
     if (!isLoggedIn || !_hasChannels) {
       return _buildBrowseChannels(context);
     }
-    // Case 2: logged in with channels -> show membership, leaders, selection
     return _buildMemberChannels(context);
   }
 
-  // ---- Case 1: browse/join, same source list as HomePage._buildAllChannelsWithJoin ----
   Widget _buildBrowseChannels(BuildContext context) {
     final displayChannels = allChannels.isNotEmpty ? allChannels : userChannels;
 
@@ -242,17 +215,8 @@ class WebNavbar extends StatelessWidget {
 
     return GestureDetector(
       onTap: () => onJoinChannel(channel),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
+      child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: Colors.white.withValues(alpha: 0.16),
-            width: 0.7,
-          ),
-        ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -288,7 +252,6 @@ class WebNavbar extends StatelessWidget {
     );
   }
 
-  // ---- Case 2: member channels, same source as HomePage._buildLoggedInWithChannels ----
   Widget _buildMemberChannels(BuildContext context) {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -316,34 +279,8 @@ class WebNavbar extends StatelessWidget {
 
     return GestureDetector(
       onTap: () => onChannelSelected(channel),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          gradient: isSelected
-              ? const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0x4034D399), Color(0x40059669)],
-                )
-              : null,
-          color: isSelected ? null : Colors.white.withValues(alpha: 0.07),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: isSelected
-                ? const Color(0xFF6EE7B7).withValues(alpha: 0.8)
-                : Colors.white.withValues(alpha: 0.14),
-            width: isSelected ? 1.2 : 0.7,
-          ),
-          boxShadow: isSelected
-              ? [
-                  BoxShadow(
-                    color: const Color(0xFF34D399).withValues(alpha: 0.35),
-                    blurRadius: 10,
-                  ),
-                ]
-              : null,
-        ),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -355,8 +292,9 @@ class WebNavbar extends StatelessWidget {
               channel.name,
               style: TextStyle(
                 fontSize: 13,
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w600,
                 color: isSelected ? const Color(0xFF6EE7B7) : Colors.white,
+                decoration: isSelected ? TextDecoration.underline : null,
               ),
             ),
             if (leader != null) ...[
@@ -388,16 +326,7 @@ class WebNavbar extends StatelessWidget {
     return GestureDetector(
       onTap: isFull ? null : onCreateChannel,
       child: Container(
-        width: 34,
-        height: 34,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(
-            color: Colors.white.withValues(alpha: isFull ? 0.15 : 0.35),
-            width: 0.8,
-          ),
-          color: Colors.white.withValues(alpha: 0.06),
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         child: Icon(
           Icons.add_rounded,
           size: 17,
@@ -450,7 +379,7 @@ class WebNavbar extends StatelessWidget {
   }
 
   // ==========================================================================
-  // NOTIFICATIONS — chat-bubble style, green accent
+  // NOTIFICATIONS — plain bell icon
   // ==========================================================================
   Widget _buildNotificationIcon() {
     return GestureDetector(
@@ -458,55 +387,26 @@ class WebNavbar extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  const Color(0xFF34D399).withValues(alpha: 0.18),
-                  const Color(0xFF059669).withValues(alpha: 0.12),
-                ],
-              ),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: const Color(0xFF6EE7B7).withValues(alpha: 0.35),
-                width: 0.8,
-              ),
-            ),
-            child: const Icon(
-              Icons.chat_bubble_rounded,
-              size: 19,
-              color: Color(0xFF6EE7B7),
-            ),
+          Icon(
+            Icons.notifications_none_outlined,
+            size: 24,
+            color: Colors.white,
           ),
           if (notificationCount > 0)
             Positioned(
-              top: -5,
-              right: -5,
+              top: -4,
+              right: -6,
               child: Container(
-                padding: const EdgeInsets.all(4),
-                constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(colors: FunspotGradients.gold),
+                padding: const EdgeInsets.all(3),
+                constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                decoration: const BoxDecoration(
+                  color: Colors.red,
                   shape: BoxShape.circle,
-                  border: Border.all(
-                    color: const Color(0xFF0B3D2E),
-                    width: 2,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFFF5B841).withValues(alpha: 0.5),
-                      blurRadius: 6,
-                    ),
-                  ],
                 ),
                 child: Text(
                   notificationCount > 99 ? '99+' : notificationCount.toString(),
                   style: const TextStyle(
-                    color: Color(0xFF0B3D2E),
+                    color: Colors.white,
                     fontSize: 8,
                     fontWeight: FontWeight.w800,
                   ),
@@ -520,7 +420,7 @@ class WebNavbar extends StatelessWidget {
   }
 
   // ==========================================================================
-  // AVATAR — medal-ring style
+  // AVATAR — circular with border, loads account image
   // ==========================================================================
   Widget _buildAvatar() {
     return GestureDetector(
@@ -528,29 +428,25 @@ class WebNavbar extends StatelessWidget {
       child: Container(
         width: 42,
         height: 42,
-        padding: const EdgeInsets.all(2),
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           shape: BoxShape.circle,
-          gradient: LinearGradient(
-            colors: FunspotGradients.avatarRing, // mint -> gold ring
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.16),
+            width: 1,
           ),
         ),
-        child: Container(
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: FunspotGradients.logo,
-            ),
-          ),
-          child: Center(
-            child: Icon(
-              isLoggedIn ? Icons.person_rounded : Icons.login_rounded,
-              size: 18,
-              color: Colors.white,
-            ),
-          ),
+        child: CircleAvatar(
+          backgroundColor: const Color(0xFF0B3D2E),
+          backgroundImage: isLoggedIn
+              ? const NetworkImage('https://i.pravatar.cc/150?img=1')
+              : null,
+          child: !isLoggedIn
+              ? const Icon(
+                  Icons.person_outline,
+                  color: Colors.white,
+                  size: 20,
+                )
+              : null,
         ),
       ),
     );

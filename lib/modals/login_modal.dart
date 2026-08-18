@@ -803,7 +803,7 @@ class _LoginContentState extends State<_LoginContent> {
         final userId = user?['id']?.toString();
         if (userId != null && token != null) {
           await _performLogin(userId, username, token, _verifiedPhone);
-          _toast('Welcome to Clash, $username! 🎉');
+          _toast('Welcome to Funspot, $username! 🎉');
           setState(() => _loading = false);
         } else {
           _toast(
