@@ -1,0 +1,582 @@
+// lib/pages/home_page_web.dart
+import 'package:flutter/material.dart';
+import '../pages/fan_Funzy_design.dart';
+import '../WebView/Hompage/channels.dart';
+import '../WebView/Hompage/navbar.dart';
+import 'Hompage/sidebar_profile.dart';
+import '../WebView/Hompage/main_content_tabs.dart';
+import '../pages/fixture_page.dart';
+import "../pages/posts_page.dart";
+import '../pages/logs.dart';
+import '../../models/user_channel.dart';
+import '../../services/auth_service.dart';
+import '../../services/toast_helper.dart';
+
+class HomePageWeb extends StatefulWidget {
+  const HomePageWeb({super.key});
+
+  @override
+  State<HomePageWeb> createState() => _HomePageWebState();
+}
+
+class _HomePageWebState extends State<HomePageWeb> {
+  String _selectedChannel = 'All Channels';
+  String? _selectedChannelId;
+  List<Channel> _channels = [];
+  int _notificationCount = 3;
+
+  // Page controllers for each tab content
+  final PageController _arenaPageController = PageController();
+  final PageController _feedPageController = PageController();
+  final PageController _logsPageController = PageController();
+
+  bool _isLoggedIn = true;
+  List<UserChannel> _userChannels = [];
+  List<UserChannel> _allChannels = [];
+  Set<String> _joiningChannelIds = {};
+  int _maxChannels = 3;
+  bool _isLoading = true;
+
+  final AuthService _authService = AuthService();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAllData();
+  }
+
+  // ==========================================================================
+  // DATA LOADING METHODS
+  // ==========================================================================
+
+  Future<void> _loadAllData() async {
+    setState(() => _isLoading = true);
+
+    try {
+      // Load user's joined channels
+      await _loadUserChannels();
+
+      // Load all available channels
+      await _loadAllChannels();
+
+      // Load channels list
+      await _loadChannels();
+
+      // Set default selected channel
+      if (_channels.isNotEmpty && _selectedChannelId == null) {
+        _selectedChannelId = _channels.first.id;
+        _selectedChannel = _channels.first.name;
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading data: $e');
+      // Fallback to mock data
+      _loadMockData();
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _loadChannels() async {
+    try {
+      // Try to load from API
+      final channels = await _fetchChannelsFromApi();
+      setState(() {
+        _channels = channels;
+      });
+    } catch (e) {
+      debugPrint('❌ Failed to load channels: $e');
+      // Fallback to mock data
+      setState(() {
+        _channels = MockChannelData.getChannels();
+      });
+    }
+  }
+
+  Future<void> _loadUserChannels() async {
+    final userId = _authService.userId;
+    if (userId == null || userId.isEmpty) {
+      setState(() {
+        _userChannels = [];
+      });
+      return;
+    }
+
+    try {
+      final userChannels = await _fetchUserChannelsFromApi(userId);
+      setState(() {
+        _userChannels = userChannels;
+      });
+    } catch (e) {
+      debugPrint('❌ Failed to load user channels: $e');
+      // Fallback to mock user channels
+      setState(() {
+        
+      });
+    }
+  }
+
+  Future<void> _loadAllChannels() async {
+    try {
+      final allChannels = await _fetchAllChannelsFromApi();
+      setState(() {
+        _allChannels = allChannels;
+      });
+    } catch (e) {
+      debugPrint('❌ Failed to load all channels: $e');
+      // Fallback: convert channels to UserChannel
+      setState(() {
+        _allChannels = _channels
+            .map((c) => UserChannel(
+                  channelId: c.id,
+                  name: c.name,
+                  members: [],
+                  memberCount: 0,
+                  season: '1',
+                  isAdmin: false,
+                ))
+            .toList();
+      });
+    }
+  }
+
+  // ==========================================================================
+  // API METHODS (Replace with your actual API calls)
+  // ==========================================================================
+
+  Future<List<Channel>> _fetchChannelsFromApi() async {
+    // TODO: Replace with actual API call
+    // Example:
+    // final response = await http.get(Uri.parse('$apiBaseUrl/api/channels'));
+    // return (jsonDecode(response.body) as List).map((json) => Channel.fromJson(json)).toList();
+
+    // For now, return mock data
+    return MockChannelData.getChannels();
+  }
+
+  Future<List<UserChannel>> _fetchUserChannelsFromApi(String userId) async {
+    // TODO: Replace with actual API call
+    // Example:
+    // final response = await http.get(Uri.parse('$apiBaseUrl/api/users/$userId/channels'));
+    // return (jsonDecode(response.body) as List).map((json) => UserChannel.fromJson(json)).toList();
+
+    // For now, return mock data
+    return  [] ;
+  }
+
+  Future<List<UserChannel>> _fetchAllChannelsFromApi() async {
+    // TODO: Replace with actual API call
+    // Example:
+    // final response = await http.get(Uri.parse('$apiBaseUrl/api/channels/all'));
+    // return (jsonDecode(response.body) as List).map((json) => UserChannel.fromJson(json)).toList();
+
+    // For now, convert channels to UserChannel
+    return _channels
+        .map((c) => UserChannel(
+              channelId: c.id,
+              name: c.name,
+              members: [],
+              memberCount: 0,
+              season: "",
+              isAdmin: false,
+            ))
+        .toList();
+  }
+
+  Future<bool> _joinChannelApi(String userId, String channelId) async {
+    // TODO: Replace with actual API call
+    // Example:
+    // final response = await http.post(
+    //   Uri.parse('$apiBaseUrl/api/channels/$channelId/join'),
+    //   body: jsonEncode({'user_id': userId}),
+    // );
+    // return response.statusCode == 200;
+
+    // For now, return true
+    return true;
+  }
+
+  // ==========================================================================
+  // MOCK DATA
+  // ==========================================================================
+
+  void _loadMockData() {
+    _channels = MockChannelData.getChannels();
+   
+    _allChannels = _channels
+        .map((c) => UserChannel(
+              channelId: c.id,
+              name: c.name,
+              members: [],
+              memberCount: 0,
+              season: "1",
+              isAdmin: false,
+            ))
+        .toList();
+
+    if (_channels.isNotEmpty && _selectedChannelId == null) {
+      _selectedChannelId = _channels.first.id;
+      _selectedChannel = _channels.first.name;
+    }
+  }
+
+ 
+
+  // ==========================================================================
+  // EVENT HANDLERS
+  // ==========================================================================
+
+  Future<void> _handleJoinChannel(UserChannel channel) async {
+    setState(() {
+      _joiningChannelIds.add(channel.channelId);
+    });
+
+    try {
+      final success = await _joinChannelApi(
+        _authService.userId ?? '',
+        channel.channelId,
+      );
+
+      if (success && mounted) {
+        // Refresh user channels
+        await _loadUserChannels();
+       // ToastHelper.showSuccess('Joined ${channel.name} successfully!');
+      } else {
+       // ToastHelper.showError('Failed to join channel');
+      }
+    } catch (e) {
+      debugPrint('❌ Join channel error: $e');
+     // ToastHelper.showError('Error joining channel');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _joiningChannelIds.remove(channel.channelId);
+        });
+      }
+    }
+  }
+
+  void _handleChannelSelected(UserChannel channel) {
+    setState(() {
+      _selectedChannelId = channel.channelId;
+      _selectedChannel = channel.name;
+    });
+  }
+
+  void _handleCreateChannel() {
+    // TODO: Show dialog or navigate to create channel page
+    //ToastHelper.showInfo('Create channel feature coming soon!');
+  }
+
+  void _handleLogout() {
+    _authService.logout();
+    setState(() {
+      _isLoggedIn = false;
+      _userChannels = [];
+    });
+    // TODO: Navigate to login page
+    // Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => LoginPage()));
+    //ToastHelper.showSuccess('Logged out successfully');
+  }
+
+  // ==========================================================================
+  // UI METHODS
+  // ==========================================================================
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: FanColors.background,
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: FanColors.primary),
+              const SizedBox(height: 16),
+              Text(
+                'Loading...',
+                style: TextStyle(color: FanColors.textSecondary),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: FanColors.background,
+      body: Column(
+        children: [
+          // Top Navbar
+          WebNavbar(
+            isLoggedIn: _isLoggedIn,
+            userChannels: _userChannels,
+            allChannels: _allChannels,
+            selectedChannelId: _selectedChannelId,
+            joiningChannelIds: _joiningChannelIds,
+            maxChannels: _maxChannels,
+            onChannelSelected: _handleChannelSelected,
+            onJoinChannel: _handleJoinChannel,
+            onCreateChannel: _handleCreateChannel,
+            onMenuTap: _showMenu,
+            onNotificationTap: _showNotifications,
+            notificationCount: _notificationCount,
+          ),
+
+          // Main Content Area
+          Expanded(
+            child: Row(
+              children: [
+                // Left Sidebar - Profile with Channels
+               SizedBox(
+                  width: 280, // or whatever your sidebar should be
+                  child: SidebarProfile(
+                    apiBaseUrl: 'https://clash-api-m5mr.onrender.com',
+                    userId: _authService.userId ?? '',
+                    username: _authService.username ?? '',
+                    phone: _authService.phone ?? '',
+                    onLogout: _handleLogout,
+                    userChannels: _userChannels,
+                  ),
+                ),
+
+                // Main Content - Tabs
+                Expanded(
+                  child: MainContentTabs(
+                    arenaContent: FixturesPage(
+                      userId: _authService.userId ?? '',
+                      username: _authService.username ?? '',
+                      authToken: null,
+                      scrollController: null,
+                      onLogout: _handleLogout,
+                      isLoggedIn: true,
+                      syncToFixtures: true,
+                      selectedChannelId: _selectedChannelId,
+                      selectedChannelName: _selectedChannel,
+                      userChannels: _userChannels,
+                    ),
+                    feedContent: PostsPage(
+                      currentUserId: _authService.userId ?? '',
+                      currentUsername: _authService.username ?? '',
+                      authToken: null,
+                      scrollController: null,
+                      onLogout: _handleLogout,
+                      isLoggedIn: true,
+                    ),
+                    logsContent: HistoryPage(
+                      userId: _authService.userId ?? '',
+                      username: _authService.username ?? '',
+                      authToken: null,
+                      isLoggedIn: true,
+                      userChannels: _userChannels,
+                      scrollController: null,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        height: 200,
+        decoration: BoxDecoration(
+          color: FanColors.surfaceElevated,
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(20),
+            topRight: Radius.circular(20),
+          ),
+        ),
+        child: Column(
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 8, bottom: 4),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: FanColors.border.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            ListTile(
+              leading: Icon(Icons.person_outline, color: FanColors.textPrimary),
+              title: Text('Profile',
+                  style: TextStyle(color: FanColors.textPrimary)),
+              onTap: () => Navigator.pop(context),
+            ),
+            ListTile(
+              leading:
+                  Icon(Icons.settings_outlined, color: FanColors.textPrimary),
+              title: Text('Settings',
+                  style: TextStyle(color: FanColors.textPrimary)),
+              onTap: () => Navigator.pop(context),
+            ),
+            ListTile(
+              leading: Icon(Icons.logout, color: FanColors.away),
+              title: Text('Logout', style: TextStyle(color: FanColors.away)),
+              onTap: () {
+                Navigator.pop(context);
+                _handleLogout();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showNotifications() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        height: 400,
+        decoration: BoxDecoration(
+          color: FanColors.surfaceElevated,
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(20),
+            topRight: Radius.circular(20),
+          ),
+        ),
+        child: Column(
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 8, bottom: 4),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: FanColors.border.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Icon(Icons.notifications, color: FanColors.primary),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Notifications',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: FanColors.textPrimary,
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    'Mark all read',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: FanColors.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  _buildNotificationItem(
+                    icon: '⚽',
+                    title: 'New match added',
+                    subtitle: 'Liverpool vs Everton added to Arena',
+                    time: '2 min ago',
+                  ),
+                  _buildNotificationItem(
+                    icon: '💬',
+                    title: 'New comment',
+                    subtitle: 'John commented on your post',
+                    time: '15 min ago',
+                  ),
+                  _buildNotificationItem(
+                    icon: '👤',
+                    title: 'New follower',
+                    subtitle: 'Sarah started following you',
+                    time: '1 hour ago',
+                  ),
+                  _buildNotificationItem(
+                    icon: '🏆',
+                    title: 'Leaderboard update',
+                    subtitle: 'You moved to #3 in Premier League',
+                    time: '3 hours ago',
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNotificationItem({
+    required String icon,
+    required String title,
+    required String subtitle,
+    required String time,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: FanColors.surface,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Center(
+              child: Text(icon, style: const TextStyle(fontSize: 18)),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: FanColors.textPrimary,
+                  ),
+                ),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: FanColors.textSecondary,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          Text(
+            time,
+            style: TextStyle(
+              fontSize: 10,
+              color: FanColors.textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

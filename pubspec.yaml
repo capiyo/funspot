@@ -1,0 +1,113 @@
+name: funtasy
+description: Funtasy - Where Champions Are Crowned
+publish_to: 'none'
+
+version: 1.0.0+12
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # UI Icons
+  cupertino_icons: ^1.0.8
+  font_awesome_flutter: ^11.0.0
+  material_design_icons_flutter: ^7.0.7296
+  google_fonts: ^6.2.1
+  share_plus: ^13.2.0
+
+  # Splash screen — needs to be a real dependency (not dev_dependencies)
+  # because FlutterNativeSplash.preserve()/.remove() are called at runtime
+  # from main.dart, not just by the code-gen CLI tool.
+  flutter_native_splash: ^2.4.0
+
+  # Firebase
+  firebase_core: ^4.11.0
+  firebase_auth: ^6.5.4
+  firebase_messaging: ^16.4.1
+
+  # Networking
+  http: ^1.2.0
+  dio: ^5.4.0
+  web_socket_channel: ^3.0.0
+  app_links: ^7.2.1
+  just_bubble: ^0.0.1
+
+  # Storage
+  shared_preferences: ^2.3.0
+  sqflite: ^2.3.3
+  path: ^1.9.0
+
+  # Media
+  video_player: ^2.9.0
+  chewie: ^1.8.0
+  video_thumbnail: ^0.5.5
+  image_picker: ^1.1.0
+  cached_network_image: ^3.4.0
+
+  # Utilities
+  intl: ^0.20.3
+  background_downloader: ^9.4.4
+  provider: ^6.1.2
+  shimmer: ^3.0.0
+  connectivity_plus: ^7.2.0
+  flutter_dotenv: ^6.0.1
+  url_launcher: ^6.3.0
+
+  # Others
+  fluttertoast: ^9.1.0
+  country_code_picker: ^3.0.0
+
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/icons/
+
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icons/lasta.png"
+  adaptive_icon_background: "#121A30"
+  adaptive_icon_foreground: "assets/icons/lasta.png"
+  remove_alpha_ios: true
+
+
+# ── SINGLE flutter_native_splash block ──────────────────────────────────
+# There must be only ONE top-level `flutter_native_splash:` key in this
+# file — a duplicate key is invalid YAML and silently drops the first one.
+#
+# The app's theme now mirrors the OS appearance setting automatically
+# (see FanThemeController), so it's safe for the native splash to also
+# key off OS brightness via the `_dark` suffixed fields below — the two
+# will agree by the time the first real Flutter frame renders.
+flutter_native_splash:
+  color: "#FFFFFF"
+  image: assets/icons/lasta.png
+
+  color_dark: "#121A30"
+  image_dark: assets/icons/lasta.png
+
+  android_gravity: center
+  ios_content_mode: center
+  fullscreen: true
+  android: true
+  ios: true
+
+  android_12:
+    image: assets/icons/lasta.png
+    icon_background_color: "#FFFFFF"
+
+    image_dark: assets/icons/lasta.png
+    icon_background_color_dark: "#121A30"

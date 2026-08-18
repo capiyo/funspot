@@ -1,0 +1,51 @@
+name: clash
+description: "social media for football fans and games voting."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.10.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  http: ^1.1.0
+  intl: ^0.20.2
+  shimmer: ^3.0.0
+  cached_network_image: ^3.3.0
+  connectivity_plus: ^7.0.0
+  shared_preferences: ^2.2.2
+  flutter_dotenv: ^6.0.0
+  flutter_launcher_icons: ^0.14.4  # This package is installed
+  change_app_package_name: ^1.5.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+# ✅ CORRECT CONFIGURATION - Only keep this section:
+
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icons/clash.png"  # Changed from SVG to PNG
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/icons/clash.png"  # Changed from SVG to PNG
+  
+  # If you need web configuration (remove or fix):
+  # web:
+  #   generate: false  # Or configure properly as a map
+  
+  # For Android 12+ adaptive icons (optional):
+  android_adaptive_icon_foreground: "assets/icons/clash.png"
+  android_adaptive_icon_background: "#FFFFFF"
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/icons/clash.png  # Make sure this matches the path above
