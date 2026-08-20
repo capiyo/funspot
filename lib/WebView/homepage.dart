@@ -1,7 +1,8 @@
 // lib/pages/home_page_web.dart
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import '../pages/fan_Funzy_design.dart';
-import '../WebView/Hompage/channels.dart';
 import '../WebView/Hompage/navbar.dart';
 import 'Hompage/sidebar_profile.dart';
 import '../WebView/Hompage/main_content_tabs.dart';
@@ -11,6 +12,8 @@ import '../pages/logs.dart';
 import '../../models/user_channel.dart';
 import '../../services/auth_service.dart';
 import '../../services/toast_helper.dart';
+import '../main.dart'; // AppCache
+import '../modals/FAB/profile_modal.dart' as profile_modal;
 
 class HomePageWeb extends StatefulWidget {
   const HomePageWeb({super.key});
@@ -20,9 +23,12 @@ class HomePageWeb extends StatefulWidget {
 }
 
 class _HomePageWebState extends State<HomePageWeb> {
+  static const String API_BASE_URL = 'https://clash-api-m5mr.onrender.com/api';
+  static const int MAX_CHANNELS = 3;
+  static const int TARGET_DISPLAY_COUNT = 5;
+
   String _selectedChannel = 'All Channels';
   String? _selectedChannelId;
-  List<Channel> _channels = [];
   int _notificationCount = 3;
 
   final PageController _arenaPageController = PageController();
@@ -33,8 +39,13 @@ class _HomePageWebState extends State<HomePageWeb> {
   List<UserChannel> _userChannels = [];
   List<UserChannel> _allChannels = [];
   Set<String> _joiningChannelIds = {};
-  int _maxChannels = 3;
+  int _maxChannels = MAX_CHANNELS;
   bool _isLoading = true;
+  bool _isFull = false;
+
+  // Profile data — nickname / clubFan / countryFan for the navbar.
+  profile_modal.UserData? _profile;
+  bool _isProfileLoading = true;
 
   final AuthService _authService = AuthService();
 
@@ -72,24 +83,55 @@ class _HomePageWebState extends State<HomePageWeb> {
     print('   isLoggedIn: $_isLoggedIn');
 
     try {
-      await _loadChannels();
-      await _loadAllChannels();
-
-      if (_isLoggedIn) {
-        await _loadUserChannels();
-      } else {
+      if (!_isLoggedIn) {
+        // Not logged in -> just show browsable channels, no profile.
+        final browsable = await _fetchBrowsableChannels(
+          excludeIds: const {},
+          limit: TARGET_DISPLAY_COUNT,
+        );
         setState(() {
           _userChannels = [];
+          _allChannels = browsable;
+          _isFull = false;
+          _profile = null;
+          _isProfileLoading = false;
         });
+      } else {
+        final userId = _authService.userId ?? '';
+        final joined = await _fetchUserChannelsFromApi(userId);
+
+        // Fire the profile fetch in parallel with channel resolution below —
+        // it doesn't gate the channel UI, so don't await it inline.
+        _loadProfile(userId);
+
+        if (joined.length >= MAX_CHANNELS) {
+          // Full -> only show joined channels, don't bother browsing.
+          setState(() {
+            _userChannels = joined.take(MAX_CHANNELS).toList();
+            _allChannels = joined.take(MAX_CHANNELS).toList();
+            _isFull = true;
+          });
+        } else {
+          final joinedIds = joined.map((c) => c.channelId).toSet();
+          final needed = TARGET_DISPLAY_COUNT - joined.length;
+          final browsable = await _fetchBrowsableChannels(
+            excludeIds: joinedIds,
+            limit: needed,
+          );
+          setState(() {
+            _userChannels = joined;
+            _allChannels = [...joined, ...browsable];
+            _isFull = false;
+          });
+        }
       }
 
-      if (_channels.isNotEmpty && _selectedChannelId == null) {
-        _selectedChannelId = _channels.first.id;
-        _selectedChannel = _channels.first.name;
+      if (_allChannels.isNotEmpty && _selectedChannelId == null) {
+        _selectedChannelId = _allChannels.first.channelId;
+        _selectedChannel = _allChannels.first.name;
       }
     } catch (e) {
       print('❌ Error loading data: $e');
-      
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -97,73 +139,90 @@ class _HomePageWebState extends State<HomePageWeb> {
     }
   }
 
-  Future<void> _loadChannels() async {
-    print('🔄 _loadChannels: Starting...');
-    try {
-      final channels = await _fetchChannelsFromApi();
-      print('✅ _fetchChannelsFromApi returned ${channels.length} channels');
-      setState(() {
-        _channels = channels;
-      });
-    } catch (e) {
-      print('❌ _loadChannels failed: $e');
-      setState(() {
-        _channels = MockChannelData.getChannels();
-        print('📦 Fallback: ${_channels.length} mock channels loaded');
-      });
-    }
-  }
+  // ==========================================================================
+  // PROFILE — mirrors SwipeableProfileModal._loadUserData()
+  // ==========================================================================
 
-  Future<void> _loadUserChannels() async {
-    final userId = _authService.userId;
-    if (userId == null || userId.isEmpty) {
+  Future<void> _loadProfile(String userId) async {
+    if (userId.isEmpty) {
       setState(() {
-        _userChannels = [];
+        _profile = null;
+        _isProfileLoading = false;
       });
       return;
     }
 
-    print('🔄 _loadUserChannels: Starting for userId: $userId');
-    try {
-      final userChannels = await _fetchUserChannelsFromApi(userId);
-      setState(() {
-        _userChannels = userChannels;
-      });
-      print('✅ Loaded ${_userChannels.length} user channels');
-    } catch (e) {
-      print('❌ Failed to load user channels: $e');
-      setState(() {
-        _userChannels = [];
-      });
-    }
-  }
+    setState(() => _isProfileLoading = true);
 
-  Future<void> _loadAllChannels() async {
-    print('🔄 _loadAllChannels: Starting...');
-    print('   _channels length before: ${_channels.length}');
+    // Instant paint from AppCache if it matches this user, same as the modal.
+    if (AppCache.profile != null &&
+        (AppCache.profile!['user_id']?.toString() ??
+                AppCache.profile!['userId']?.toString() ??
+                '') ==
+            userId) {
+      try {
+        final cached = profile_modal.UserData.fromJson(AppCache.profile!);
+        if (mounted) {
+          setState(() {
+            _profile = cached;
+            _isProfileLoading = false;
+          });
+        }
+        print('⚡ home_page_web: profile loaded instantly from AppCache');
+      } catch (e) {
+        print('⚠️ home_page_web: failed to apply cached profile: $e');
+      }
+    }
+
     try {
-      final allChannels = await _fetchAllChannelsFromApi();
-      print(
-          '✅ _fetchAllChannelsFromApi returned ${allChannels.length} channels');
-      setState(() {
-        _allChannels = allChannels;
-      });
+      final headers = {'Content-Type': 'application/json'};
+      final token = _authService.authToken;
+      if (token != null && token.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $token';
+      }
+
+      final response = await http
+          .get(
+            Uri.parse('$API_BASE_URL/profile/profile/$userId'),
+            headers: headers,
+          )
+          .timeout(const Duration(seconds: 10));
+
+      print('📥 home_page_web: GET profile -> ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final decoded = json.decode(response.body);
+
+        Map<String, dynamic>? userMap;
+        if (decoded is List) {
+          if (decoded.isNotEmpty) {
+            userMap = Map<String, dynamic>.from(decoded.first as Map);
+          }
+        } else if (decoded is Map) {
+          userMap = Map<String, dynamic>.from(decoded);
+        }
+
+        if (userMap != null && mounted) {
+          final user = profile_modal.UserData.fromJson(userMap);
+          setState(() {
+            _profile = user;
+            _isProfileLoading = false;
+          });
+          await AppCache.saveProfile(userMap);
+          return;
+        }
+      }
+
+      // 404 / empty / unparsable -> no profile yet, but don't blow away
+      // anything already painted from cache.
+      if (mounted && _profile == null) {
+        setState(() => _isProfileLoading = false);
+      }
     } catch (e) {
-      print('❌ _loadAllChannels failed: $e');
-      setState(() {
-        _allChannels = _channels
-            .map((c) => UserChannel(
-                  channelId: c.id,
-                  name: c.name,
-                  members: [],
-                  memberCount: c.memberCount,
-                  season: '1',
-                  isAdmin: false,
-                ))
-            .toList();
-        print(
-            '📦 Fallback: ${_allChannels.length} UserChannels from _channels');
-      });
+      print('❌ home_page_web: _loadProfile error: $e');
+      if (mounted) {
+        setState(() => _isProfileLoading = false);
+      }
     }
   }
 
@@ -171,54 +230,102 @@ class _HomePageWebState extends State<HomePageWeb> {
   // API METHODS
   // ==========================================================================
 
-  Future<List<Channel>> _fetchChannelsFromApi() async {
-    print('🌐 _fetchChannelsFromApi: Returning mock channels...');
-    return MockChannelData.getChannels();
-  }
-
   Future<List<UserChannel>> _fetchUserChannelsFromApi(String userId) async {
     print('🌐 _fetchUserChannelsFromApi: userId: $userId');
-    final allChannels = await _fetchAllChannelsFromApi();
-    if (allChannels.length >= 2) {
-      return allChannels.take(2).toList();
+    if (userId.isEmpty) return [];
+
+    try {
+      final headers = {'Content-Type': 'application/json'};
+      final token = _authService.authToken;
+      if (token != null && token.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $token';
+      }
+
+      final response = await http
+          .get(Uri.parse('$API_BASE_URL/channels/user/$userId'),
+              headers: headers)
+          .timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final List<dynamic> channelsData = data['channels'] ?? [];
+        final result = channelsData
+            .map((c) => UserChannel.fromJson(c as Map<String, dynamic>))
+            .toList();
+        print('✅ Loaded ${result.length} user channels');
+        return result;
+      }
+
+      print('❌ _fetchUserChannelsFromApi failed: ${response.statusCode}');
+    } catch (e) {
+      print('❌ _fetchUserChannelsFromApi error: $e');
     }
     return [];
   }
 
-  Future<List<UserChannel>> _fetchAllChannelsFromApi() async {
+  Future<List<UserChannel>> _fetchBrowsableChannels({
+    required Set<String> excludeIds,
+    required int limit,
+  }) async {
     print(
-        '🌐 _fetchAllChannelsFromApi: Converting _channels to UserChannel...');
-    print('   _channels length: ${_channels.length}');
+        '🌐 _fetchBrowsableChannels: limit=$limit, excluding=${excludeIds.length}');
+    try {
+      final headers = {'Content-Type': 'application/json'};
+      final token = _authService.authToken;
+      if (token != null && token.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $token';
+      }
 
-    if (_channels.isEmpty) {
-      print('⚠️ _channels is empty, loading mock channels...');
-      await _loadChannels();
+      final response = await http
+          .get(Uri.parse('$API_BASE_URL/channels/all'), headers: headers)
+          .timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final List<dynamic> channelsData = data['channels'] ?? [];
+        final fetched = channelsData
+            .map((c) => UserChannel.fromJson(c as Map<String, dynamic>))
+            .where((c) => !excludeIds.contains(c.channelId))
+            .toList();
+        final result = fetched.take(limit).toList();
+        print('✅ _fetchBrowsableChannels returned ${result.length} channels');
+        return result;
+      }
+
+      print('❌ _fetchBrowsableChannels failed: ${response.statusCode}');
+    } catch (e) {
+      print('❌ _fetchBrowsableChannels error: $e');
     }
-
-    final result = _channels
-        .map((c) => UserChannel(
-              channelId: c.id,
-              name: c.name,
-              members: [],
-              memberCount: c.memberCount,
-              season: '1',
-              isAdmin: false,
-            ))
-        .toList();
-    print('✅ Converted ${result.length} channels to UserChannel');
-    return result;
+    return [];
   }
 
   Future<bool> _joinChannelApi(String userId, String channelId) async {
     print('🌐 _joinChannelApi: userId: $userId, channelId: $channelId');
-    await Future.delayed(const Duration(milliseconds: 500));
-    return true;
+    try {
+      final headers = {'Content-Type': 'application/json'};
+      final token = _authService.authToken;
+      if (token != null && token.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $token';
+      }
+
+      final response = await http
+          .post(
+            Uri.parse('$API_BASE_URL/channels/members/add'),
+            headers: headers,
+            body: json.encode({
+              'channel_id': channelId,
+              'user_id': userId,
+              'username': _authService.username ?? '',
+            }),
+          )
+          .timeout(const Duration(seconds: 10));
+
+      return response.statusCode == 200;
+    } catch (e) {
+      print('❌ _joinChannelApi error: $e');
+      return false;
+    }
   }
-
-  // ==========================================================================
-  // MOCK DATA
-  // ==========================================================================
-
 
   // ==========================================================================
   // EVENT HANDLERS
@@ -237,14 +344,14 @@ class _HomePageWebState extends State<HomePageWeb> {
       );
 
       if (success && mounted) {
-        await _loadUserChannels();
+        await _loadAllData();
         //ToastHelper.showSuccess('Joined ${channel.name} successfully!');
       } else {
-       // ToastHelper.showError('Failed to join channel');
+        // ToastHelper.showError('Failed to join channel');
       }
     } catch (e) {
       print('❌ Join channel error: $e');
-     // ToastHelper.showError('Error joining channel');
+      // ToastHelper.showError('Error joining channel');
     } finally {
       if (mounted) {
         setState(() {
@@ -273,8 +380,9 @@ class _HomePageWebState extends State<HomePageWeb> {
     setState(() {
       _isLoggedIn = false;
       _userChannels = [];
+      _profile = null;
     });
-   // ToastHelper.showSuccess('Logged out successfully');
+    // ToastHelper.showSuccess('Logged out successfully');
   }
 
   // ==========================================================================
@@ -319,6 +427,10 @@ class _HomePageWebState extends State<HomePageWeb> {
             onMenuTap: _showMenu,
             onNotificationTap: _showNotifications,
             notificationCount: _notificationCount,
+            userId: _authService.userId,
+            nickname: _profile?.nickname,
+            teamName: _profile?.clubFan,
+            country: _profile?.countryFan,
           ),
           Expanded(
             child: Row(

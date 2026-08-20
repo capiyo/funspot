@@ -45,6 +45,15 @@ class WebNavbar extends StatelessWidget {
   final VoidCallback onNotificationTap;
   final int notificationCount;
 
+  // Identity used to pick a deterministic avatar photo.
+  final String? userId;
+
+  // Profile summary shown in the middle of the navbar — sourced from
+  // UserData (nickname / clubFan / countryFan) in the parent page.
+  final String? nickname;
+  final String? teamName;
+  final String? country;
+
   const WebNavbar({
     super.key,
     required this.isLoggedIn,
@@ -59,9 +68,51 @@ class WebNavbar extends StatelessWidget {
     required this.onMenuTap,
     required this.onNotificationTap,
     this.notificationCount = 0,
+    this.userId,
+    this.nickname,
+    this.teamName,
+    this.country,
   });
 
   bool get _hasChannels => userChannels.isNotEmpty;
+
+  bool get _hasProfileInfo =>
+      (nickname != null && nickname!.isNotEmpty) ||
+      (teamName != null && teamName!.isNotEmpty) ||
+      (country != null && country!.isNotEmpty);
+
+  // Pool of 20 placeholder avatar photo indices from pravatar.cc
+  static const List<int> _avatarPool = [
+    1,
+    3,
+    5,
+    7,
+    8,
+    11,
+    12,
+    14,
+    15,
+    16,
+    18,
+    22,
+    25,
+    28,
+    32,
+    33,
+    36,
+    41,
+    44,
+    47,
+  ];
+
+  /// Deterministic pick so the same user always gets the same avatar
+  /// (instead of a new random face on every rebuild).
+  String _avatarUrlFor(String? id) {
+    final key = (id == null || id.isEmpty) ? 'guest' : id;
+    final index = key.hashCode.abs() % _avatarPool.length;
+    final imgNumber = _avatarPool[index];
+    return 'https://i.pravatar.cc/150?img=$imgNumber';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -91,10 +142,14 @@ class WebNavbar extends StatelessWidget {
       child: Row(
         children: [
           _buildLogo(),
-          const SizedBox(width: 32),
+          const Spacer(),
+          if (isLoggedIn && _hasProfileInfo) ...[
+            _buildProfileInfo(),
+            const Spacer(),
+          ],
           _buildSearch(),
-          const SizedBox(width: 24),
-          Expanded(child: _buildChannelSection(context)),
+          const SizedBox(width: 16),
+          Flexible(child: _buildChannelSection(context)),
           const SizedBox(width: 16),
           _buildNotificationIcon(),
           const SizedBox(width: 16),
@@ -170,6 +225,82 @@ class WebNavbar extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+
+  // ==========================================================================
+  // PROFILE INFO — nickname / team / country, centered in the navbar
+  // ==========================================================================
+  Widget _buildProfileInfo() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.14),
+          width: 0.7,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (nickname != null && nickname!.isNotEmpty)
+            _buildProfileInfoItem(
+              icon: Icons.shield_outlined,
+              value: nickname!,
+            ),
+          if (teamName != null && teamName!.isNotEmpty) ...[
+            _buildProfileInfoDivider(),
+            _buildProfileInfoItem(
+              icon: Icons.sports_soccer_outlined,
+              value: teamName!,
+            ),
+          ],
+          if (country != null && country!.isNotEmpty) ...[
+            _buildProfileInfoDivider(),
+            _buildProfileInfoItem(
+              icon: Icons.flag_outlined,
+              value: country!,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProfileInfoItem({
+    required IconData icon,
+    required String value,
+  }) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 13, color: const Color(0xFF6EE7B7)),
+        const SizedBox(width: 5),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 110),
+          child: Text(
+            value,
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
+            ),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildProfileInfoDivider() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 10),
+      width: 1,
+      height: 14,
+      color: Colors.white.withValues(alpha: 0.18),
     );
   }
 
@@ -420,7 +551,7 @@ class WebNavbar extends StatelessWidget {
   }
 
   // ==========================================================================
-  // AVATAR — circular with border, loads account image
+  // AVATAR — circular with border, loads a real placeholder photo
   // ==========================================================================
   Widget _buildAvatar() {
     return GestureDetector(
@@ -435,18 +566,47 @@ class WebNavbar extends StatelessWidget {
             width: 1,
           ),
         ),
-        child: CircleAvatar(
-          backgroundColor: const Color(0xFF0B3D2E),
-          backgroundImage: isLoggedIn
-              ? const NetworkImage('https://i.pravatar.cc/150?img=1')
-              : null,
-          child: !isLoggedIn
-              ? const Icon(
-                  Icons.person_outline,
-                  color: Colors.white,
-                  size: 20,
+        child: ClipOval(
+          child: isLoggedIn
+              ? Image.network(
+                  _avatarUrlFor(userId),
+                  fit: BoxFit.cover,
+                  width: 42,
+                  height: 42,
+                  loadingBuilder: (context, child, progress) {
+                    if (progress == null) return child;
+                    return Container(
+                      color: const Color(0xFF0B3D2E),
+                      child: const Center(
+                        child: SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 1.5,
+                            valueColor:
+                                AlwaysStoppedAnimation(Color(0xFF34D399)),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                  errorBuilder: (context, error, stackTrace) => Container(
+                    color: const Color(0xFF0B3D2E),
+                    child: const Icon(
+                      Icons.person_outline,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                  ),
                 )
-              : null,
+              : Container(
+                  color: const Color(0xFF0B3D2E),
+                  child: const Icon(
+                    Icons.person_outline,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                ),
         ),
       ),
     );

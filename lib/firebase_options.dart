@@ -41,48 +41,48 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyDb4rIhioT4vMPZjSjSXG-Y7iKY4CuAr9I',
-    appId: '1:1095645826942:web:a8d0a51955731f17b1ad2f',
-    messagingSenderId: '1095645826942',
-    projectId: 'Funzy-66865',
-    authDomain: 'Funzy-66865.firebaseapp.com',
-    storageBucket: 'Funzy-66865.firebasestorage.app',
-    measurementId: 'G-55YVBHY26F',
+    apiKey: 'AIzaSyCWMGz6AIRXgu7GVZiJWlkvO6tVZADf5tY',
+    appId: '1:661929781606:web:3f306a659ae64ac7f780a7',
+    messagingSenderId: '661929781606',
+    projectId: 'funzy-d56d7',
+    authDomain: 'funzy-d56d7.firebaseapp.com',
+    storageBucket: 'funzy-d56d7.firebasestorage.app',
+    measurementId: 'G-J4JX2WVWH9',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyAAKUT0cq09FAF4BIoFOwz96XC4RtyvH14',
-    appId: '1:1095645826942:android:95aec01bd16621dbb1ad2f',
-    messagingSenderId: '1095645826942',
-    projectId: 'Funzy-66865',
-    storageBucket: 'Funzy-66865.firebasestorage.app',
+    apiKey: 'AIzaSyAJx50VfAYcAa_C-9OxFaXNb_UYBYWv3BM',
+    appId: '1:661929781606:android:56a13272d99e6865f780a7',
+    messagingSenderId: '661929781606',
+    projectId: 'funzy-d56d7',
+    storageBucket: 'funzy-d56d7.firebasestorage.app',
   );
-
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyDquynDNGLuWXQzqSMpZIMdNs5Wi-H5q90',
-    appId: '1:1095645826942:ios:58c29ecf5c2c3b4db1ad2f',
-    messagingSenderId: '1095645826942',
-    projectId: 'Funzy-66865',
-    storageBucket: 'Funzy-66865.firebasestorage.app',
-    iosBundleId: 'com.tech.Funzy',
+    apiKey: 'AIzaSyDQ2Fc0xTxvCZFdD47vc8ls0LNfzvVz5So',
+    appId: '1:661929781606:ios:f5a7aa65f4440bfcf780a7',
+    messagingSenderId: '661929781606',
+    projectId: 'funzy-d56d7',
+    storageBucket: 'funzy-d56d7.firebasestorage.app',
+    androidClientId: '661929781606-c3lj4r1ufg1350tdd8vsdlemois1j1cb.apps.googleusercontent.com',
+    iosBundleId: 'com.futa.clasha',
   );
-
   static const FirebaseOptions macos = FirebaseOptions(
-    apiKey: 'AIzaSyDquynDNGLuWXQzqSMpZIMdNs5Wi-H5q90',
-    appId: '1:1095645826942:ios:a6b44d8237fb663cb1ad2f',
-    messagingSenderId: '1095645826942',
-    projectId: 'Funzy-66865',
-    storageBucket: 'Funzy-66865.firebasestorage.app',
-    iosBundleId: 'com.tech.Funzy',
+    apiKey: 'AIzaSyDQ2Fc0xTxvCZFdD47vc8ls0LNfzvVz5So',
+    appId: '1:661929781606:ios:08d487fb009e66b8f780a7',
+    messagingSenderId: '661929781606',
+    projectId: 'funzy-d56d7',
+    storageBucket: 'funzy-d56d7.firebasestorage.app',
+    androidClientId: '661929781606-c3lj4r1ufg1350tdd8vsdlemois1j1cb.apps.googleusercontent.com',
+    iosBundleId: 'com.tech.clash',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(
-    apiKey: 'AIzaSyDb4rIhioT4vMPZjSjSXG-Y7iKY4CuAr9I',
-    appId: '1:1095645826942:web:f8712cc037704511b1ad2f',
-    messagingSenderId: '1095645826942',
-    projectId: 'Funzy-66865',
-    authDomain: 'Funzy-66865.firebaseapp.com',
-    storageBucket: 'Funzy-66865.firebasestorage.app',
-    measurementId: 'G-V96GG4MWTB',
+    apiKey: 'AIzaSyCWMGz6AIRXgu7GVZiJWlkvO6tVZADf5tY',
+    appId: '1:661929781606:web:7f02493b361b12bef780a7',
+    messagingSenderId: '661929781606',
+    projectId: 'funzy-d56d7',
+    authDomain: 'funzy-d56d7.firebaseapp.com',
+    storageBucket: 'funzy-d56d7.firebasestorage.app',
+    measurementId: 'G-F55G25QGZV',
   );
 }
