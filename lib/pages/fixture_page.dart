@@ -17834,22 +17834,52 @@ Widget _buildLiveCommentary(BuildContext context, String fixtureId) {
 
     final userVote = _userVotes[fixtureId];
 
-    final navigationFuture = Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ChatScreen(
-          channelId: channelId,
-          fixtureId: fixtureId,
-          fixture: fixture,
-          userId: widget.userId,
-          username: widget.username,
-          authToken: widget.authToken,
-          isLoggedIn: _isUserLoggedIn(),
-          comradesList: _userComrades,
-          userVoteSelection: userVote,
-        ),
-      ),
+    final chatScreen = ChatScreen(
+      channelId: channelId,
+      fixtureId: fixtureId,
+      fixture: fixture,
+      userId: widget.userId,
+      username: widget.username,
+      authToken: widget.authToken,
+      isLoggedIn: _isUserLoggedIn(),
+      comradesList: _userComrades,
+      userVoteSelection: userVote,
     );
+
+    // ✅ Wide screens (desktop web) get a modal dialog; mobile app and
+    // narrow/mobile web keep the existing full-page push behavior.
+    final double screenWidth = MediaQuery.of(context).size.width;
+    final bool isWideScreen = screenWidth >= 900;
+
+    final Future<dynamic> navigationFuture = isWideScreen
+        ? showDialog(
+            context: context,
+            barrierDismissible: true,
+            barrierColor: Colors.black.withOpacity(0.5),
+            builder: (dialogContext) => Dialog(
+              backgroundColor: Colors.transparent,
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 80,
+                vertical: 40,
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  width: 480,
+                  height: MediaQuery.of(context).size.height * 0.85,
+                  constraints: const BoxConstraints(maxHeight: 900),
+                  color: FanColors.background,
+                  child: chatScreen,
+                ),
+              ),
+            ),
+          )
+        : Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => chatScreen,
+            ),
+          );
 
     unawaited(_ensureChannelFixture(channelId, fixtureId));
 

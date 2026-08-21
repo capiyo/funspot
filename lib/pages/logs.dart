@@ -1527,7 +1527,7 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
   // OPEN CHAT
   // ============================================================
 
- Future<void> _openChat(HistoryItem item) async {
+Future<void> _openChat(HistoryItem item) async {
   if (!widget.isLoggedIn) {
     ToastHelper.showWarning('Log in to open this chat');
     return;
@@ -1578,9 +1578,6 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
     return;
   }
 
-  // ✅ Resolve through the SAME helper _createComment uses, instead of
-  // duplicating the fallback logic here. Guarantees posting and opening
-  // always agree on which channel this fixture's chat lives in.
   final String? channelId = _resolveChannelIdFor(item);
   if (channelId == null) {
     ToastHelper.showWarning('Join a channel first to chat');
@@ -1594,28 +1591,53 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
       )
       .name;
 
-  final result = await Navigator.push(
-    context,
-    MaterialPageRoute(
-      builder: (context) => ChatScreen(
-        channelId: channelId,
-        fixtureId: item.fixtureId,
-        fixture: fixture!,
-        userId: widget.userId,
-        username: widget.username,
-        authToken: widget.authToken,
-        isLoggedIn: widget.isLoggedIn,
-        comradesList: widget.userChannels.isNotEmpty ? {} : const {},
-        userVoteSelection: userVoteSelection,
-      ),
-    ),
+  final chatScreen = ChatScreen(
+    channelId: channelId,
+    fixtureId: item.fixtureId,
+    fixture: fixture,
+    userId: widget.userId,
+    username: widget.username,
+    authToken: widget.authToken,
+    isLoggedIn: widget.isLoggedIn,
+    comradesList: widget.userChannels.isNotEmpty ? {} : const {},
+    userVoteSelection: userVoteSelection,
   );
+
+  final double screenWidth = MediaQuery.of(context).size.width;
+  final bool isWideScreen = screenWidth >= 900;
+
+  final result = isWideScreen
+      ? await showDialog(
+          context: context,
+          barrierDismissible: true,
+          barrierColor: Colors.black.withOpacity(0.5),
+          builder: (dialogContext) => Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 80,
+              vertical: 40,
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Container(
+                width: 480,
+                height: MediaQuery.of(context).size.height * 0.85,
+                constraints: const BoxConstraints(maxHeight: 900),
+                color: FanColors.background,
+                child: chatScreen,
+              ),
+            ),
+          ),
+        )
+      : await Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => chatScreen),
+        );
 
   if (result == true) {
     _loadHistory(forceRefresh: true);
   }
 }
-
   // ============================================================
   // BUILD UI
   // ============================================================
@@ -2949,42 +2971,67 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
   // OPEN LIVE GAME CHAT
   // ============================================================
 
-  Future<void> _openLiveGameChat(fixture_models.Fixture fixture) async {
-    if (!widget.isLoggedIn) {
-      ToastHelper.showWarning('Log in to join the chat');
-      return;
-    }
-
-    if (widget.userChannels.isEmpty) {
-      ToastHelper.showWarning('No channels available');
-      return;
-    }
-
-    final UserChannel channel = widget.userChannels.first;
-    final userVoteSelection = AppCache.userVotes[fixture.matchId];
-
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ChatScreen(
-          channelId: channel.channelId,
-          fixtureId: fixture.matchId,
-          fixture: fixture,
-          userId: widget.userId,
-          username: widget.username,
-          authToken: widget.authToken,
-          isLoggedIn: widget.isLoggedIn,
-          comradesList: const {},
-          userVoteSelection: userVoteSelection,
-        ),
-      ),
-    );
-
-    if (result == true) {
-      _loadLiveGamesFromCache();
-    }
+ Future<void> _openLiveGameChat(fixture_models.Fixture fixture) async {
+  if (!widget.isLoggedIn) {
+    ToastHelper.showWarning('Log in to join the chat');
+    return;
   }
 
+  if (widget.userChannels.isEmpty) {
+    ToastHelper.showWarning('No channels available');
+    return;
+  }
+
+  final UserChannel channel = widget.userChannels.first;
+  final userVoteSelection = AppCache.userVotes[fixture.matchId];
+
+  final chatScreen = ChatScreen(
+    channelId: channel.channelId,
+    fixtureId: fixture.matchId,
+    fixture: fixture,
+    userId: widget.userId,
+    username: widget.username,
+    authToken: widget.authToken,
+    isLoggedIn: widget.isLoggedIn,
+    comradesList: const {},
+    userVoteSelection: userVoteSelection,
+  );
+
+  final double screenWidth = MediaQuery.of(context).size.width;
+  final bool isWideScreen = screenWidth >= 900;
+
+  final result = isWideScreen
+      ? await showDialog(
+          context: context,
+          barrierDismissible: true,
+          barrierColor: Colors.black.withOpacity(0.5),
+          builder: (dialogContext) => Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 80,
+              vertical: 40,
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Container(
+                width: 480,
+                height: MediaQuery.of(context).size.height * 0.85,
+                constraints: const BoxConstraints(maxHeight: 900),
+                color: FanColors.background,
+                child: chatScreen,
+              ),
+            ),
+          ),
+        )
+      : await Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => chatScreen),
+        );
+
+  if (result == true) {
+    _loadLiveGamesFromCache();
+  }
+}
   // ============================================================
   // HELPER: Get League Icon
   // ============================================================

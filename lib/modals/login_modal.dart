@@ -1286,7 +1286,7 @@ class _LoginContentState extends State<_LoginContent> {
   String get _title {
     if (_showPinFallback) return _isNewPinUser ? 'Set PIN' : 'Enter PIN';
     if (_showOtp) return 'Verify Phone';
-    return 'Join Clash';
+    return 'Join Funspot,Relax,Enjoy';
   }
 
   @override

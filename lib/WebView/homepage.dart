@@ -13,7 +13,7 @@ import '../../models/user_channel.dart';
 import '../../services/auth_service.dart';
 import '../../services/toast_helper.dart';
 import '../main.dart'; // AppCache
-import '../modals/FAB/profile_modal.dart' as profile_modal;
+import '../WebView/Hompage/sidebar_profile.dart' as profile_modal;
 
 class HomePageWeb extends StatefulWidget {
   const HomePageWeb({super.key});
