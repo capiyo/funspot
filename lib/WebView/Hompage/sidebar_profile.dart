@@ -310,6 +310,23 @@ class _SidebarProfileState extends State<SidebarProfile>
     }
   }
 
+  @override
+  void didUpdateWidget(covariant SidebarProfile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.userChannels != oldWidget.userChannels) {
+      setState(() {
+
+        _userChannels = List.from(widget.userChannels);
+      });
+      // TabController length is immutable after creation — must recreate it
+      final newCount = _userChannels.length.clamp(0, 3);
+      if (newCount != _tabController.length) {
+        _tabController.dispose();
+        _tabController = TabController(length: newCount, vsync: this);
+      }
+    }
+  }
+
   void _applyUserData(UserData user) {
     setState(() {
       _userData = user;
@@ -1742,7 +1759,7 @@ class _SidebarProfileState extends State<SidebarProfile>
           controller: _countryController,
           focusNode: _countryFocus,
           label: 'COUNTRY',
-          hint: 'Where are you from?',
+          hint: 'Country  you support?',
           icon: Icons.flag_outlined,
           onSubmitted: _unfocusAll,
         ),
@@ -2254,7 +2271,15 @@ class _SidebarProfileState extends State<SidebarProfile>
 
     return Container(
       width: 240,
-      color: FanColors.surfaceElevated,
+      decoration: BoxDecoration(
+        color: FanColors.surfaceElevated,
+        border: Border(
+          right: BorderSide(
+            color: FanColors.border.withValues(alpha: 0.5),
+            width: 1,
+          ),
+        ),
+      ),
       child: Column(
         children: [
           // Header

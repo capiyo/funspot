@@ -1597,6 +1597,7 @@ class _SwipeableProfileModalState extends State<SwipeableProfileModal>
         _buildInfoRow(
           icon: Icons.flag_outlined,
           label: 'Country You Support',
+
           value: _userData!.countryFan.isNotEmpty
               ? _userData!.countryFan
               : 'Not set',
@@ -1742,7 +1743,7 @@ class _SwipeableProfileModalState extends State<SwipeableProfileModal>
           controller: _countryController,
           focusNode: _countryFocus,
           label: 'COUNTRY',
-          hint: 'Where are you from?',
+          hint: 'country you support?',
           icon: Icons.flag_outlined,
           onSubmitted: _unfocusAll,
         ),
