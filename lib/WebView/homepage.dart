@@ -144,87 +144,99 @@ class _HomePageWebState extends State<HomePageWeb> {
   // ==========================================================================
 
   Future<void> _loadProfile(String userId) async {
-    if (userId.isEmpty) {
-      setState(() {
-        _profile = null;
-        _isProfileLoading = false;
-      });
+  if (userId.isEmpty) {
+    setState(() {
+      _profile = null;
+      _isProfileLoading = false;
+    });
+    return;
+  }
+
+  setState(() => _isProfileLoading = true);
+
+  // Instant paint from AppCache if it matches this user, same as the modal.
+  if (AppCache.profile != null &&
+      (AppCache.profile!['user_id']?.toString() ??
+              AppCache.profile!['userId']?.toString() ??
+              '') ==
+          userId) {
+    try {
+      final cached = profile_modal.UserData.fromJson(AppCache.profile!);
+      if (mounted) {
+        setState(() {
+          _profile = cached;
+          _isProfileLoading = false;
+        });
+      }
+      print('⚡ home_page_web: profile loaded instantly from AppCache');
+      return; // ✅ Return early if cache is valid
+    } catch (e) {
+      print('⚠️ home_page_web: failed to apply cached profile: $e');
+    }
+  }
+
+  try {
+    final headers = {'Content-Type': 'application/json'};
+    final token = _authService.authToken;
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+
+    final response = await http
+        .get(
+          Uri.parse('$API_BASE_URL/profile/profile/$userId'),
+          headers: headers,
+        )
+        .timeout(const Duration(seconds: 10));
+
+    print('📥 home_page_web: GET profile -> ${response.statusCode}');
+
+    if (response.statusCode == 200) {
+      final decoded = json.decode(response.body);
+
+      Map<String, dynamic>? userMap;
+      if (decoded is List) {
+        if (decoded.isNotEmpty) {
+          userMap = Map<String, dynamic>.from(decoded.first as Map);
+        }
+      } else if (decoded is Map) {
+        userMap = Map<String, dynamic>.from(decoded);
+      }
+
+      if (userMap != null && mounted) {
+        final user = profile_modal.UserData.fromJson(userMap);
+        setState(() {
+          _profile = user;
+          _isProfileLoading = false;
+        });
+        await AppCache.saveProfile(userMap);
+        return;
+      }
+    }
+
+    // ✅ 404 - Profile doesn't exist
+    if (response.statusCode == 404) {
+      print('📭 home_page_web: Profile not found (404)');
+      if (mounted) {
+        setState(() {
+          _profile = null;
+          _isProfileLoading = false;
+        });
+      }
       return;
     }
 
-    setState(() => _isProfileLoading = true);
-
-    // Instant paint from AppCache if it matches this user, same as the modal.
-    if (AppCache.profile != null &&
-        (AppCache.profile!['user_id']?.toString() ??
-                AppCache.profile!['userId']?.toString() ??
-                '') ==
-            userId) {
-      try {
-        final cached = profile_modal.UserData.fromJson(AppCache.profile!);
-        if (mounted) {
-          setState(() {
-            _profile = cached;
-            _isProfileLoading = false;
-          });
-        }
-        print('⚡ home_page_web: profile loaded instantly from AppCache');
-      } catch (e) {
-        print('⚠️ home_page_web: failed to apply cached profile: $e');
-      }
+    // ✅ Other errors - keep whatever we have from cache
+    if (mounted && _profile == null) {
+      setState(() => _isProfileLoading = false);
     }
-
-    try {
-      final headers = {'Content-Type': 'application/json'};
-      final token = _authService.authToken;
-      if (token != null && token.isNotEmpty) {
-        headers['Authorization'] = 'Bearer $token';
-      }
-
-      final response = await http
-          .get(
-            Uri.parse('$API_BASE_URL/profile/profile/$userId'),
-            headers: headers,
-          )
-          .timeout(const Duration(seconds: 10));
-
-      print('📥 home_page_web: GET profile -> ${response.statusCode}');
-
-      if (response.statusCode == 200) {
-        final decoded = json.decode(response.body);
-
-        Map<String, dynamic>? userMap;
-        if (decoded is List) {
-          if (decoded.isNotEmpty) {
-            userMap = Map<String, dynamic>.from(decoded.first as Map);
-          }
-        } else if (decoded is Map) {
-          userMap = Map<String, dynamic>.from(decoded);
-        }
-
-        if (userMap != null && mounted) {
-          final user = profile_modal.UserData.fromJson(userMap);
-          setState(() {
-            _profile = user;
-            _isProfileLoading = false;
-          });
-          await AppCache.saveProfile(userMap);
-          return;
-        }
-      }
-
-      // 404 / empty / unparsable -> no profile yet, but don't blow away
-      // anything already painted from cache.
-      if (mounted && _profile == null) {
-        setState(() => _isProfileLoading = false);
-      }
-    } catch (e) {
-      print('❌ home_page_web: _loadProfile error: $e');
-      if (mounted) {
-        setState(() => _isProfileLoading = false);
-      }
+  } catch (e) {
+    print('❌ home_page_web: _loadProfile error: $e');
+    if (mounted) {
+      setState(() => _isProfileLoading = false);
     }
   }
+}
 
   // ==========================================================================
   // API METHODS

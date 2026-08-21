@@ -232,83 +232,92 @@ class _SidebarProfileState extends State<SidebarProfile>
   // ==========================================================================
 
   Future<void> _loadUserData() async {
-    setState(() => _isLoading = true);
+  setState(() => _isLoading = true);
 
-    // Instant paint from AppCache if this is the current user and cache matches
-    if (_isCurrentUser &&
-        AppCache.profile != null &&
-        (AppCache.profile!['user_id']?.toString() ??
-                AppCache.profile!['userId']?.toString() ??
-                '') ==
-            widget.userId) {
-      try {
-        final cachedUser = UserData.fromJson(AppCache.profile!);
-        _applyUserData(cachedUser);
-        debugPrint('⚡ Loaded profile instantly from AppCache');
-      } catch (e) {
-        debugPrint('⚠️ Failed to apply cached profile: $e');
-      }
-    }
-
+  // Instant paint from AppCache if this is the current user and cache matches
+  if (_isCurrentUser &&
+      AppCache.profile != null &&
+      (AppCache.profile!['user_id']?.toString() ??
+              AppCache.profile!['userId']?.toString() ??
+              '') ==
+          widget.userId) {
     try {
-      final response = await http
-          .get(
-            Uri.parse(
-                '${widget.apiBaseUrl}/api/profile/profile/${widget.userId}'),
-            headers: _headers(),
-          )
-          .timeout(_timeout);
-
-      debugPrint('📥 GET profile: ${response.statusCode}');
-
-      if (response.statusCode == 200 && mounted) {
-        final decoded = jsonDecode(response.body);
-
-        if (decoded is List) {
-          if (decoded.isEmpty) {
-            debugPrint('📭 No profile found - going to edit mode');
-            setState(() {
-              _isLoading = false;
-              _isEditing = true;
-            });
-            return;
-          }
-          final Map<String, dynamic> userMap =
-              Map<String, dynamic>.from(decoded.first as Map);
-          final user = UserData.fromJson(userMap);
-          _applyUserData(user);
-          if (_isCurrentUser) await AppCache.saveProfile(userMap);
-        } else if (decoded is Map) {
-          final Map<String, dynamic> userMap =
-              Map<String, dynamic>.from(decoded);
-          final user = UserData.fromJson(userMap);
-          _applyUserData(user);
-          if (_isCurrentUser) await AppCache.saveProfile(userMap);
-        } else {
-          setState(() {
-            _isLoading = false;
-            _isEditing = true;
-          });
-        }
-      } else if (response.statusCode == 404) {
-        setState(() {
-          _isLoading = false;
-          _isEditing = true;
-        });
-      } else {
-        if (_userData == null) {
-          setState(() => _isLoading = false);
-        }
-      }
+      final cachedUser = UserData.fromJson(AppCache.profile!);
+      _applyUserData(cachedUser);
+      debugPrint('⚡ Loaded profile instantly from AppCache');
+      return; // ✅ Return early if cache is valid
     } catch (e) {
-      debugPrint('❌ Load user error: $e');
-      if (_userData == null) {
-        setState(() => _isLoading = false);
-      } else {
-        setState(() => _isLoading = false);
-      }
+      debugPrint('⚠️ Failed to apply cached profile: $e');
     }
   }
+
+  try {
+    final response = await http
+        .get(
+          Uri.parse(
+              '${widget.apiBaseUrl}/api/profile/profile/${widget.userId}'),
+          headers: _headers(),
+        )
+        .timeout(_timeout);
+
+    debugPrint('📥 GET profile: ${response.statusCode}');
+
+    if (response.statusCode == 200 && mounted) {
+      final decoded = jsonDecode(response.body);
+
+      if (decoded is List) {
+        if (decoded.isEmpty) {
+          debugPrint('📭 No profile found - showing no profile view');
+          setState(() {
+            _isLoading = false;
+            _isEditing = false; // ✅ DON'T set to true
+          });
+          return;
+        }
+        final Map<String, dynamic> userMap =
+            Map<String, dynamic>.from(decoded.first as Map);
+        final user = UserData.fromJson(userMap);
+        _applyUserData(user);
+        if (_isCurrentUser) await AppCache.saveProfile(userMap);
+      } else if (decoded is Map) {
+        final Map<String, dynamic> userMap =
+            Map<String, dynamic>.from(decoded);
+        final user = UserData.fromJson(userMap);
+        _applyUserData(user);
+        if (_isCurrentUser) await AppCache.saveProfile(userMap);
+      } else {
+        setState(() {
+          _isLoading = false;
+          _isEditing = false; // ✅ DON'T set to true
+        });
+      }
+    } else if (response.statusCode == 404) {
+      debugPrint('📭 Profile not found (404) - showing no profile view');
+      setState(() {
+        _isLoading = false;
+        _isEditing = false; // ✅ DON'T set to true - show _buildNoProfileView()
+      });
+    } else {
+      // Other errors - if we don't have data from cache, show no profile view
+      if (_userData == null) {
+        setState(() {
+          _isLoading = false;
+          _isEditing = false;
+        });
+      }
+    }
+  } catch (e) {
+    debugPrint('❌ Load user error: $e');
+    if (_userData == null) {
+      setState(() {
+        _isLoading = false;
+        _isEditing = false;
+      });
+    } else {
+      setState(() => _isLoading = false);
+    }
+  }
+}
 
   @override
   void didUpdateWidget(covariant SidebarProfile oldWidget) {
