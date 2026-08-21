@@ -12,6 +12,7 @@ import '../pages/logs.dart';
 import '../../models/user_channel.dart';
 import '../../services/auth_service.dart';
 import '../../services/toast_helper.dart';
+import '../../modals/Funzy/chat_screen.dart';
 
 class HomePageWeb extends StatefulWidget {
   const HomePageWeb({super.key});
@@ -40,6 +41,9 @@ class _HomePageWebState extends State<HomePageWeb> {
   int _maxChannels = MAX_CHANNELS;
   bool _isLoading = true;
   bool _isFull = false;
+
+  // Track if we need to rebuild FixturesPage
+  int _fixturesPageKey = 0;
 
   final AuthService _authService = AuthService();
 
@@ -86,6 +90,8 @@ class _HomePageWebState extends State<HomePageWeb> {
           _userChannels = [];
           _allChannels = browsable;
           _isFull = false;
+          _selectedChannelId = null;
+          _selectedChannel = 'All Channels';
         });
       } else {
         final userId = _authService.userId ?? '';
@@ -109,6 +115,12 @@ class _HomePageWebState extends State<HomePageWeb> {
             _allChannels = [...joined, ...browsable];
             _isFull = false;
           });
+        }
+
+        // If no channel is selected, select the first one
+        if (_selectedChannelId == null && _userChannels.isNotEmpty) {
+          _selectedChannelId = _userChannels.first.channelId;
+          _selectedChannel = _userChannels.first.name;
         }
       }
 
@@ -261,11 +273,13 @@ class _HomePageWebState extends State<HomePageWeb> {
     setState(() {
       _selectedChannelId = channel.channelId;
       _selectedChannel = channel.name;
+      _fixturesPageKey++;
     });
   }
 
   void _handleCreateChannel() {
     print('➕ _handleCreateChannel');
+    // TODO: Show create channel modal
   }
 
   void _handleLogout() {
@@ -274,7 +288,80 @@ class _HomePageWebState extends State<HomePageWeb> {
     setState(() {
       _isLoggedIn = false;
       _userChannels = [];
+      _selectedChannelId = null;
+      _selectedChannel = 'All Channels';
+      _fixturesPageKey++;
     });
+  }
+
+  // ==========================================================================
+  // HANDLE OPEN CHAT - WITH WIDE SCREEN CONDITIONAL
+  // ==========================================================================
+
+  Future<void> _handleOpenChat(UserChannel channel) async {
+    print('📱 Long press on channel: ${channel.name}');
+
+    if (!_isLoggedIn) {
+      _showLoginModal();
+      return;
+    }
+
+    // Navigate to ChatScreen for the channel
+    final chatScreen = ChatScreen(
+      channelId: channel.channelId,
+      fixtureId: null,
+      fixture: null,
+      userId: _authService.userId ?? '',
+      username: _authService.username ?? '',
+      authToken: _authService.authToken,
+      isLoggedIn: _isLoggedIn,
+      comradesList: Set<String>(),
+      userVoteSelection: null,
+    );
+
+    // ✅ WIDE SCREEN DETECTION - same as HistoryPage
+    final double screenWidth = MediaQuery.of(context).size.width;
+    final bool isWideScreen = screenWidth >= 900;
+
+    if (isWideScreen) {
+      // Web/Desktop: Open as Dialog/Modal
+      await showDialog(
+        context: context,
+        barrierDismissible: true,
+        barrierColor: Colors.black.withOpacity(0.5),
+        builder: (dialogContext) => Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 80,
+            vertical: 40,
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Container(
+              width: 480,
+              height: MediaQuery.of(context).size.height * 0.85,
+              constraints: const BoxConstraints(maxHeight: 900),
+              color: FanColors.background,
+              child: chatScreen,
+            ),
+          ),
+        ),
+      );
+    } else {
+      // Mobile: Open as full page
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => chatScreen),
+      );
+    }
+  }
+
+  // ==========================================================================
+  // SHOW LOGIN MODAL
+  // ==========================================================================
+
+  void _showLoginModal() {
+    //ToastHelper.showWarning('Please log in first', context: context);
   }
 
   // ==========================================================================
@@ -316,18 +403,18 @@ class _HomePageWebState extends State<HomePageWeb> {
             onChannelSelected: _handleChannelSelected,
             onJoinChannel: _handleJoinChannel,
             onCreateChannel: _handleCreateChannel,
+            onOpenChat: _handleOpenChat,
             onMenuTap: _showMenu,
             onNotificationTap: _showNotifications,
             notificationCount: _notificationCount,
             userId: _authService.userId,
-            nickname: null, // ✅ WebProfilePanel handles its own data
+            nickname: null,
             teamName: null,
             country: null,
           ),
           Expanded(
             child: Row(
               children: [
-                // ✅ Self-contained web profile panel
                 const SizedBox(
                   width: 280,
                   child: WebProfilePanel(),
@@ -335,9 +422,10 @@ class _HomePageWebState extends State<HomePageWeb> {
                 Expanded(
                   child: MainContentTabs(
                     arenaContent: FixturesPage(
+                      key: ValueKey(_fixturesPageKey),
                       userId: _authService.userId ?? '',
                       username: _authService.username ?? '',
-                      authToken: null,
+                      authToken: _authService.authToken,
                       scrollController: null,
                       onLogout: _handleLogout,
                       isLoggedIn: _isLoggedIn,
@@ -349,7 +437,7 @@ class _HomePageWebState extends State<HomePageWeb> {
                     feedContent: PostsPage(
                       currentUserId: _authService.userId ?? '',
                       currentUsername: _authService.username ?? '',
-                      authToken: null,
+                      authToken: _authService.authToken,
                       scrollController: null,
                       onLogout: _handleLogout,
                       isLoggedIn: _isLoggedIn,
@@ -357,7 +445,7 @@ class _HomePageWebState extends State<HomePageWeb> {
                     logsContent: HistoryPage(
                       userId: _authService.userId ?? '',
                       username: _authService.username ?? '',
-                      authToken: null,
+                      authToken: _authService.authToken,
                       isLoggedIn: _isLoggedIn,
                       userChannels: _userChannels,
                       scrollController: null,

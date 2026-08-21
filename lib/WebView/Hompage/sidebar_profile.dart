@@ -1,4 +1,4 @@
-// lib/widgets/web_profile_panel.dart
+// lib/WebView/Hompage/web_profile_panel.dart
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -61,6 +61,38 @@ class WebUserData {
 }
 
 // ============================================================================
+// CHANNEL MEMBER MODEL
+// ============================================================================
+
+class WebChannelMember {
+  final String userId;
+  final String username;
+  final int correctVotes;
+  final int totalVotes;
+  final int msgCount;
+  final int seasonPoints;
+
+  WebChannelMember({
+    required this.userId,
+    required this.username,
+    required this.correctVotes,
+    required this.totalVotes,
+    required this.msgCount,
+    required this.seasonPoints,
+  });
+
+  factory WebChannelMember.fromJson(Map<String, dynamic> json) =>
+      WebChannelMember(
+        userId: json['user_id']?.toString() ?? json['userId']?.toString() ?? '',
+        username: json['username']?.toString() ?? '',
+        correctVotes: json['correct_votes'] ?? 0,
+        totalVotes: json['total_votes'] ?? 0,
+        msgCount: json['msg_count'] ?? 0,
+        seasonPoints: json['season_points'] ?? 0,
+      );
+}
+
+// ============================================================================
 // WEB PROFILE PANEL - SELF CONTAINED
 // ============================================================================
 
@@ -76,7 +108,8 @@ class WebProfilePanel extends StatefulWidget {
   State<WebProfilePanel> createState() => _WebProfilePanelState();
 }
 
-class _WebProfilePanelState extends State<WebProfilePanel> {
+class _WebProfilePanelState extends State<WebProfilePanel>
+    with SingleTickerProviderStateMixin {
   // ==========================================================================
   // STATE - SELF CONTAINED
   // ==========================================================================
@@ -94,6 +127,12 @@ class _WebProfilePanelState extends State<WebProfilePanel> {
   bool _isEditing = false;
   bool _isSaving = false;
   bool _isLoggingOut = false;
+
+  // Channels
+  List<UserChannel> _userChannels = [];
+  bool _isChannelsLoading = true;
+  late TabController _tabController;
+  int _selectedTab = 0;
 
   // Text controllers
   late TextEditingController _nicknameController;
@@ -115,8 +154,6 @@ class _WebProfilePanelState extends State<WebProfilePanel> {
   static const String _apiBaseUrl = 'https://clash-api-m5mr.onrender.com/api';
   static const Duration _timeout = Duration(seconds: 15);
 
-  bool get _isCurrentUser => true;
-
   bool _showPaymentFeatures = true;
   bool _isCheckingVisibility = false;
 
@@ -132,12 +169,19 @@ class _WebProfilePanelState extends State<WebProfilePanel> {
     _clubController = TextEditingController();
     _countryController = TextEditingController();
 
-    _loadUserData();
-    _initPaymentGate();
+    _tabController = TabController(length: 0, vsync: this);
+    _tabController.addListener(() {
+      if (_tabController.indexIsChanging) {
+        setState(() => _selectedTab = _tabController.index);
+      }
+    });
+
+    _loadAllData();
   }
 
   @override
   void dispose() {
+    _tabController.dispose();
     _nicknameController.dispose();
     _clubController.dispose();
     _countryController.dispose();
@@ -148,29 +192,32 @@ class _WebProfilePanelState extends State<WebProfilePanel> {
   }
 
   // ==========================================================================
-  // PAYMENT GATE
+  // DATA LOADING
   // ==========================================================================
 
-  Future<void> _initPaymentGate() async {
-    await _loadAuthToken();
-    await _checkPaymentVisibility();
-    if (_showPaymentFeatures) {
-      _fetchBalance();
-    }
-  }
-
-  // ==========================================================================
-  // DATA LOADING - SELF CONTAINED
-  // ==========================================================================
-
-  Future<void> _loadUserData() async {
+  Future<void> _loadAllData() async {
     if (!_isLoggedIn) {
       setState(() {
         _isLoading = false;
+        _isChannelsLoading = false;
         _userData = null;
+        _userChannels = [];
       });
       return;
     }
+
+    await Future.wait([
+      _loadUserData(),
+      _loadUserChannels(),
+    ]);
+
+    if (_isLoggedIn) {
+      _initPaymentGate();
+    }
+  }
+
+  Future<void> _loadUserData() async {
+    if (!_isLoggedIn) return;
 
     setState(() => _isLoading = true);
 
@@ -240,9 +287,70 @@ class _WebProfilePanelState extends State<WebProfilePanel> {
       debugPrint('❌ Load user error: $e');
       if (_userData == null) {
         setState(() => _isLoading = false);
-      } else {
-        setState(() => _isLoading = false);
       }
+    }
+  }
+
+  Future<void> _loadUserChannels() async {
+    if (!_isLoggedIn) {
+      setState(() {
+        _userChannels = [];
+        _isChannelsLoading = false;
+      });
+      return;
+    }
+
+    setState(() => _isChannelsLoading = true);
+
+    try {
+      final headers = _headers();
+      final token = _authService.authToken;
+      if (token != null && token.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $token';
+      }
+
+      final response = await http
+          .get(
+            Uri.parse('$_apiBaseUrl/channels/user/$_userId'),
+            headers: headers,
+          )
+          .timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200 && mounted) {
+        final data = json.decode(response.body);
+        final List<dynamic> channelsData = data['channels'] ?? [];
+        final channels = channelsData
+            .map((c) => UserChannel.fromJson(c as Map<String, dynamic>))
+            .toList();
+
+        setState(() {
+          _userChannels = channels;
+          _isChannelsLoading = false;
+        });
+
+        // Update tab controller
+        final newCount = channels.length.clamp(0, 3);
+        if (newCount != _tabController.length) {
+          _tabController.dispose();
+          _tabController = TabController(length: newCount, vsync: this);
+          _tabController.addListener(() {
+            if (_tabController.indexIsChanging) {
+              setState(() => _selectedTab = _tabController.index);
+            }
+          });
+        }
+      } else {
+        setState(() {
+          _userChannels = [];
+          _isChannelsLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Load channels error: $e');
+      setState(() {
+        _userChannels = [];
+        _isChannelsLoading = false;
+      });
     }
   }
 
@@ -259,132 +367,14 @@ class _WebProfilePanelState extends State<WebProfilePanel> {
   }
 
   // ==========================================================================
-  // SAVE PROFILE - SELF CONTAINED
+  // PAYMENT GATE
   // ==========================================================================
 
-  Future<void> _saveProfile() async {
-    if (!_isLoggedIn) return;
-
-    final nickname = _nicknameController.text.trim();
-    final club = _clubController.text.trim();
-    final country = _countryController.text.trim();
-
-    if (nickname.isEmpty) {
-      ToastHelper.showWarning('Nickname is required');
-      return;
-    }
-    if (club.isEmpty) {
-      ToastHelper.showWarning('Favorite club is required');
-      return;
-    }
-    if (country.isEmpty) {
-      ToastHelper.showWarning('Country is required');
-      return;
-    }
-
-    setState(() => _isSaving = true);
-
-    try {
-      final body = {
-        'user_id': _userId,
-        'username': _username,
-        'phone': _phone,
-        'nickname': nickname,
-        'club_fan': club,
-        'country_fan': country,
-        'balance': _balance,
-        'number_of_bets': _userData?.numberOfBets ?? 0,
-      };
-
-      final bool isNewUser = _userData == null;
-
-      final url = isNewUser
-          ? '$_apiBaseUrl/profile/create_profile'
-          : '$_apiBaseUrl/profile/profiles/$_userId';
-
-      debugPrint('📤 SAVING: ${isNewUser ? "NEW" : "UPDATE"} user');
-
-      final response = isNewUser
-          ? await http
-              .post(
-                Uri.parse(url),
-                headers: _headers(),
-                body: jsonEncode(body),
-              )
-              .timeout(_timeout)
-          : await http
-              .put(
-                Uri.parse(url),
-                headers: _headers(),
-                body: jsonEncode(body),
-              )
-              .timeout(_timeout);
-
-      debugPrint('📥 Status: ${response.statusCode}');
-
-      if ((response.statusCode == 200 || response.statusCode == 201) &&
-          mounted) {
-        final decoded = jsonDecode(response.body);
-
-        Map<String, dynamic> userMap;
-        if (decoded is List) {
-          if (decoded.isEmpty) {
-            ToastHelper.showError('Empty response from server');
-            setState(() => _isSaving = false);
-            return;
-          }
-          userMap = Map<String, dynamic>.from(decoded.first as Map);
-        } else if (decoded is Map) {
-          userMap = Map<String, dynamic>.from(decoded);
-        } else {
-          ToastHelper.showError('Invalid response format');
-          setState(() => _isSaving = false);
-          return;
-        }
-
-        final user = WebUserData.fromJson(userMap);
-
-        setState(() {
-          _userData = user;
-          _balance = user.balance;
-          _isEditing = false;
-        });
-
-        ToastHelper.showSuccess('Profile saved!');
-        await AppCache.saveProfile(userMap);
-        _unfocusAll();
-      } else {
-        ToastHelper.showError('Save failed (${response.statusCode})');
-      }
-    } catch (e) {
-      debugPrint('❌ Save profile error: $e');
-      ToastHelper.showError('Network error: ${e.toString()}');
-    } finally {
-      if (mounted) setState(() => _isSaving = false);
-    }
-  }
-
-  // ==========================================================================
-  // HEADERS
-  // ==========================================================================
-
-  Map<String, String> _headers() {
-    final headers = {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-    };
-    if (_authToken != null && _authToken!.isNotEmpty) {
-      headers['Authorization'] = 'Bearer $_authToken';
-    }
-    return headers;
-  }
-
-  Future<void> _loadAuthToken() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      _authToken = prefs.getString('auth_token');
-    } catch (e) {
-      debugPrint('❌ Failed to load auth token: $e');
+  Future<void> _initPaymentGate() async {
+    await _loadAuthToken();
+    await _checkPaymentVisibility();
+    if (_showPaymentFeatures) {
+      _fetchBalance();
     }
   }
 
@@ -464,7 +454,133 @@ class _WebProfilePanelState extends State<WebProfilePanel> {
   }
 
   // ==========================================================================
-  // LOGOUT - SELF CONTAINED
+  // SAVE PROFILE
+  // ==========================================================================
+
+  Future<void> _saveProfile() async {
+    if (!_isLoggedIn) return;
+
+    final nickname = _nicknameController.text.trim();
+    final club = _clubController.text.trim();
+    final country = _countryController.text.trim();
+
+    if (nickname.isEmpty) {
+      ToastHelper.showWarning('Nickname is required');
+      return;
+    }
+    if (club.isEmpty) {
+      ToastHelper.showWarning('Favorite club is required');
+      return;
+    }
+    if (country.isEmpty) {
+      ToastHelper.showWarning('Country is required');
+      return;
+    }
+
+    setState(() => _isSaving = true);
+
+    try {
+      final body = {
+        'user_id': _userId,
+        'username': _username,
+        'phone': _phone,
+        'nickname': nickname,
+        'club_fan': club,
+        'country_fan': country,
+        'balance': _balance,
+        'number_of_bets': _userData?.numberOfBets ?? 0,
+      };
+
+      final bool isNewUser = _userData == null;
+
+      final url = isNewUser
+          ? '$_apiBaseUrl/profile/create_profile'
+          : '$_apiBaseUrl/profile/profiles/$_userId';
+
+      final response = isNewUser
+          ? await http
+              .post(
+                Uri.parse(url),
+                headers: _headers(),
+                body: jsonEncode(body),
+              )
+              .timeout(_timeout)
+          : await http
+              .put(
+                Uri.parse(url),
+                headers: _headers(),
+                body: jsonEncode(body),
+              )
+              .timeout(_timeout);
+
+      if ((response.statusCode == 200 || response.statusCode == 201) &&
+          mounted) {
+        final decoded = jsonDecode(response.body);
+
+        Map<String, dynamic> userMap;
+        if (decoded is List) {
+          if (decoded.isEmpty) {
+            ToastHelper.showError('Empty response from server');
+            setState(() => _isSaving = false);
+            return;
+          }
+          userMap = Map<String, dynamic>.from(decoded.first as Map);
+        } else if (decoded is Map) {
+          userMap = Map<String, dynamic>.from(decoded);
+        } else {
+          ToastHelper.showError('Invalid response format');
+          setState(() => _isSaving = false);
+          return;
+        }
+
+        final user = WebUserData.fromJson(userMap);
+
+        setState(() {
+          _userData = user;
+          _balance = user.balance;
+          _isEditing = false;
+        });
+
+        ToastHelper.showSuccess('Profile saved!');
+        await AppCache.saveProfile(userMap);
+        _unfocusAll();
+      } else {
+        ToastHelper.showError('Save failed (${response.statusCode})');
+      }
+    } catch (e) {
+      debugPrint('❌ Save profile error: $e');
+      ToastHelper.showError('Network error: ${e.toString()}');
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  // ==========================================================================
+  // HEADERS
+  // ==========================================================================
+
+  Map<String, String> _headers() {
+    final headers = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    };
+    if (_authToken != null && _authToken!.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $_authToken';
+    }
+    return headers;
+  }
+
+  Future<void> _loadAuthToken() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _authToken = prefs.getString('auth_token');
+    } catch (e) {
+      debugPrint('❌ Failed to load auth token: $e');
+    }
+  }
+
+  // ==========================================================================
+  // LOGOUT
   // ==========================================================================
 
   Future<void> _logout() async {
@@ -477,10 +593,9 @@ class _WebProfilePanelState extends State<WebProfilePanel> {
       widget.onLogout?.call();
       if (mounted) {
         ToastHelper.showSuccess('Logged out');
-        // Clear local state
         setState(() {
           _userData = null;
-          //_isLoggedIn = false;
+          _userChannels = [];
         });
       }
     } catch (e) {
@@ -505,6 +620,365 @@ class _WebProfilePanelState extends State<WebProfilePanel> {
     _clubFocus.unfocus();
     _countryFocus.unfocus();
     FocusScope.of(context).unfocus();
+  }
+
+  // ==========================================================================
+  // CHANNEL FRAGMENT
+  // ==========================================================================
+
+  Widget _buildChannelFragment(int channelIndex) {
+    if (_userChannels.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.group_off_outlined,
+              size: 32,
+              color: FanColors.textTertiary.withOpacity(0.4),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'No channels joined',
+              style: FanTypography.body.copyWith(
+                fontSize: 11,
+                color: FanColors.textTertiary.withOpacity(0.5),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final channel = _userChannels[channelIndex];
+    final sortedMembers = List<WebChannelMember>.from(
+      channel.members.map((m) => WebChannelMember(
+            userId: m.userId,
+            username: m.username,
+            correctVotes: m.correctVotes,
+            totalVotes: m.totalVotes,
+            msgCount: m.msgCount,
+            seasonPoints: m.seasonPoints,
+          )),
+    )..sort((a, b) => b.seasonPoints.compareTo(a.seasonPoints));
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Channel header
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: FanColors.primaryDim,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: FanColors.borderActive, width: 0.5),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    color: FanColors.primary,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Center(
+                    child: Text(
+                      channel.name.isNotEmpty ? channel.name[0].toUpperCase() : '?',
+                      style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        channel.name,
+                        style: FanTypography.title.copyWith(
+                          fontSize: 11,
+                          color: FanColors.textPrimary,
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          Icon(Icons.people,
+                              size: 8, color: FanColors.textTertiary),
+                          const SizedBox(width: 2),
+                          Text(
+                            '${channel.memberCount}',
+                            style: FanTypography.caption.copyWith(
+                              color: FanColors.textTertiary,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Icon(Icons.emoji_events,
+                              size: 8, color: FanColors.textTertiary),
+                          const SizedBox(width: 2),
+                          Text(
+                            'S${channel.season}',
+                            style: FanTypography.caption.copyWith(
+                              color: FanColors.textTertiary,
+                            ),
+                          ),
+                          if (channel.isAdmin) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                                vertical: 1,
+                              ),
+                              decoration: BoxDecoration(
+                                color: FanColors.primaryMuted,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                'Admin',
+                                style: FanTypography.caption.copyWith(
+                                  fontSize: 6,
+                                  fontWeight: FontWeight.w600,
+                                  color: FanColors.primary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+
+          // Members list
+          Expanded(
+            child: sortedMembers.isEmpty
+                ? Center(
+                    child: Text(
+                      'No members yet',
+                      style: FanTypography.caption.copyWith(
+                        color: FanColors.textTertiary.withOpacity(0.4),
+                      ),
+                    ),
+                  )
+                : ListView.builder(
+                    itemCount: sortedMembers.length,
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    itemBuilder: (context, index) {
+                      final member = sortedMembers[index];
+                      final isTop3 = index < 3;
+                      final rankEmojis = ['🥇', '🥈', '🥉'];
+
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 2),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: isTop3
+                              ? FanColors.primaryDim
+                              : FanColors.surfaceSunken,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: isTop3
+                                ? FanColors.borderActive
+                                : FanColors.border,
+                            width: 0.5,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            // Rank
+                            Container(
+                              width: 18,
+                              alignment: Alignment.center,
+                              child: isTop3
+                                  ? Text(
+                                      rankEmojis[index],
+                                      style: const TextStyle(fontSize: 10),
+                                    )
+                                  : Text(
+                                      '#${index + 1}',
+                                      style: FanTypography.caption.copyWith(
+                                        color: FanColors.textTertiary
+                                            .withOpacity(0.4),
+                                      ),
+                                    ),
+                            ),
+                            const SizedBox(width: 4),
+
+                            // Avatar
+                            Container(
+                              width: 20,
+                              height: 20,
+                              decoration: BoxDecoration(
+                                color: FanColors.primaryDim,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Center(
+                                child: Text(
+                                  member.username.isNotEmpty
+                                      ? member.username[0].toUpperCase()
+                                      : '?',
+                                  style: FanTypography.caption.copyWith(
+                                    fontSize: 8,
+                                    fontWeight: FontWeight.w600,
+                                    color: FanColors.primary,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+
+                            // Name
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    member.username,
+                                    style: FanTypography.body.copyWith(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                      color: FanColors.textPrimary,
+                                    ),
+                                  ),
+                                  Row(
+                                    children: [
+                                      Icon(Icons.check_circle_outline,
+                                          size: 7,
+                                          color: FanColors.textTertiary),
+                                      const SizedBox(width: 2),
+                                      Text(
+                                        '${member.correctVotes}/${member.totalVotes}',
+                                        style: FanTypography.caption.copyWith(
+                                          fontSize: 7,
+                                          color: FanColors.textTertiary,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 5),
+                                      Icon(Icons.chat_bubble_outline,
+                                          size: 7,
+                                          color: FanColors.textTertiary),
+                                      const SizedBox(width: 2),
+                                      Text(
+                                        '${member.msgCount}',
+                                        style: FanTypography.caption.copyWith(
+                                          fontSize: 7,
+                                          color: FanColors.textTertiary,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+
+                            // Points
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isTop3
+                                    ? FanColors.primary
+                                    : FanColors.surface,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.star,
+                                    size: 6,
+                                    color: isTop3
+                                        ? Colors.white
+                                        : FanColors.textTertiary,
+                                  ),
+                                  const SizedBox(width: 2),
+                                  Text(
+                                    '${member.seasonPoints}',
+                                    style: FanTypography.caption.copyWith(
+                                      fontSize: 7,
+                                      fontWeight: FontWeight.w600,
+                                      color: isTop3
+                                          ? Colors.white
+                                          : FanColors.textPrimary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ==========================================================================
+  // CHANNEL TAB BAR
+  // ==========================================================================
+
+  Widget _buildChannelTabBar() {
+    final channelCount = _userChannels.length.clamp(0, 3);
+
+    if (channelCount == 0) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        color: FanColors.surfaceSunken,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: FanColors.border, width: 0.5),
+      ),
+      child: TabBar(
+        controller: _tabController,
+        indicator: BoxDecoration(
+          color: FanColors.surface,
+          borderRadius: BorderRadius.circular(6),
+          boxShadow: FanShadows.subtle,
+        ),
+        indicatorSize: TabBarIndicatorSize.tab,
+        labelColor: FanColors.textPrimary,
+        unselectedLabelColor: FanColors.textTertiary,
+        labelStyle: const TextStyle(
+          fontSize: 9,
+          fontWeight: FontWeight.w600,
+        ),
+        unselectedLabelStyle: const TextStyle(
+          fontSize: 8,
+          fontWeight: FontWeight.w400,
+        ),
+        tabs: _userChannels.take(3).map((channel) {
+          return Tab(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Text(
+                channel.name.length > 8
+                    ? '${channel.name.substring(0, 8)}...'
+                    : channel.name,
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
   }
 
   // ==========================================================================
@@ -885,7 +1359,7 @@ class _WebProfilePanelState extends State<WebProfilePanel> {
           controller: _countryController,
           focusNode: _countryFocus,
           label: 'COUNTRY',
-          hint: 'Where are you from?',
+          hint: 'Which country you support?',
           icon: Icons.flag_outlined,
           onSubmitted: _unfocusAll,
         ),
@@ -969,7 +1443,7 @@ class _WebProfilePanelState extends State<WebProfilePanel> {
     }
 
     // Loading state
-    if (_isLoading || _isCheckingVisibility) {
+    if (_isLoading || _isCheckingVisibility || _isChannelsLoading) {
       return Container(
         width: 240,
         decoration: BoxDecoration(
@@ -986,6 +1460,8 @@ class _WebProfilePanelState extends State<WebProfilePanel> {
         ),
       );
     }
+
+    final channelCount = _userChannels.length.clamp(0, 3);
 
     // Main content
     return Container(
@@ -1084,10 +1560,73 @@ class _WebProfilePanelState extends State<WebProfilePanel> {
                   ] else ...[
                     _buildNoProfileView(),
                   ],
+
+                  // Channels Section
+                  if (_userData != null && channelCount > 0) ...[
+                    const Divider(height: 16),
+                    Container(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.people_alt_outlined,
+                            size: 14,
+                            color: FanColors.primary,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Channels',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: FanColors.textPrimary,
+                            ),
+                          ),
+                          const Spacer(),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color:
+                                  FanColors.primary.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              '${_userChannels.length}',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                color: FanColors.primary,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                  ],
                 ],
               ),
             ),
           ),
+
+          // Channel Tab Bar (fixed at bottom)
+          if (!_isLoading && !_isCheckingVisibility && channelCount > 0) ...[
+            _buildChannelTabBar(),
+            const SizedBox(height: 2),
+            SizedBox(
+              height: 180,
+              child: TabBarView(
+                controller: _tabController,
+                physics: const BouncingScrollPhysics(),
+                children: List.generate(
+                  channelCount,
+                  (index) => _buildChannelFragment(index),
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+          ],
         ],
       ),
     );

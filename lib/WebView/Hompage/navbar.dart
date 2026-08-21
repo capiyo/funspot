@@ -53,6 +53,7 @@ class WebNavbar extends StatelessWidget {
   final String? nickname;
   final String? teamName;
   final String? country;
+  final ValueChanged<UserChannel>? onOpenChat;
 
   const WebNavbar({
     super.key,
@@ -72,6 +73,7 @@ class WebNavbar extends StatelessWidget {
     this.nickname,
     this.teamName,
     this.country,
+    this.onOpenChat,
   });
 
   bool get _hasChannels => userChannels.isNotEmpty;
@@ -398,60 +400,64 @@ class WebNavbar extends StatelessWidget {
     );
   }
 
-  Widget _buildMemberChip(UserChannel channel) {
-    final bool isSelected = selectedChannelId != null
-        ? selectedChannelId == channel.channelId
-        : (userChannels.isNotEmpty &&
-            channel.channelId == userChannels.first.channelId);
+ Widget _buildMemberChip(UserChannel channel) {
+  final bool isSelected = selectedChannelId != null
+      ? selectedChannelId == channel.channelId
+      : (userChannels.isNotEmpty &&
+          channel.channelId == userChannels.first.channelId);
 
-    final sortedMembers = List<ChannelMember>.from(channel.members)
-      ..sort((a, b) => b.seasonPoints.compareTo(a.seasonPoints));
-    final leader = sortedMembers.isNotEmpty ? sortedMembers.first : null;
+  final sortedMembers = List<ChannelMember>.from(channel.members)
+    ..sort((a, b) => b.seasonPoints.compareTo(a.seasonPoints));
+  final leader = sortedMembers.isNotEmpty ? sortedMembers.first : null;
 
-    return GestureDetector(
-      onTap: () => onChannelSelected(channel),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (channel.isAdmin) ...[
-              const Text('👑', style: TextStyle(fontSize: 11)),
-              const SizedBox(width: 4),
-            ],
-            Text(
-              channel.name,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: isSelected ? const Color(0xFF6EE7B7) : Colors.white,
-                decoration: isSelected ? TextDecoration.underline : null,
+  return GestureDetector(
+    onTap: () => onChannelSelected(channel),  // ✅ Tap = select channel
+    onLongPress: () {
+      // ✅ Long press = open chat (same as HomePage)
+      // You need to add a callback for this
+      // onOpenChat?.call(channel);
+    },
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (channel.isAdmin) ...[
+            const Text('👑', style: TextStyle(fontSize: 11)),
+            const SizedBox(width: 4),
+          ],
+          Text(
+            channel.name,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: isSelected ? const Color(0xFF6EE7B7) : Colors.white,
+              decoration: isSelected ? TextDecoration.underline : null,
+            ),
+          ),
+          if (leader != null) ...[
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(colors: FunspotGradients.gold),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '${leader.username} (${leader.seasonPoints}pts)',
+                style: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF0B3D2E),
+                ),
               ),
             ),
-            if (leader != null) ...[
-              const SizedBox(width: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(colors: FunspotGradients.gold),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  '${leader.username} (${leader.seasonPoints}pts)',
-                  style: const TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF0B3D2E),
-                  ),
-                ),
-              ),
-            ],
           ],
-        ),
+        ],
       ),
-    );
-  }
-
+    ),
+  );
+}
   Widget _buildCreateChip() {
     final bool isFull = userChannels.length >= maxChannels;
     return GestureDetector(
