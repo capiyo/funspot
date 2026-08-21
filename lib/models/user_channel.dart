@@ -1,5 +1,77 @@
 // models/user_channel.dart
 
+// ============================================================================
+// SAFE PARSING HELPERS
+// Defensive against Mongo Extended JSON shapes ({"$oid": "..."}, {"$date": {...}})
+// leaking through from the Rust/BSON backend, and against any other
+// unexpected type showing up where a String/int/bool was expected.
+// ============================================================================
+
+String _asString(dynamic value, [String fallback = '']) {
+  if (value == null) return fallback;
+  if (value is String) return value;
+  if (value is Map) {
+    // Mongo Extended JSON: {"$oid": "..."} or {"$date": {"$numberLong": "..."}}
+    if (value.containsKey(r'$oid')) return value[r'$oid']?.toString() ?? fallback;
+    if (value.containsKey(r'$date')) {
+      final d = value[r'$date'];
+      if (d is Map && d.containsKey(r'$numberLong')) {
+        final millis = int.tryParse(d[r'$numberLong'].toString());
+        if (millis != null) {
+          return DateTime.fromMillisecondsSinceEpoch(millis).toIso8601String();
+        }
+      }
+      return d?.toString() ?? fallback;
+    }
+    // Unknown map shape — don't crash, just stringify as a last resort.
+    return value.toString();
+  }
+  return value.toString();
+}
+
+int _asInt(dynamic value, [int fallback = 0]) {
+  if (value == null) return fallback;
+  if (value is int) return value;
+  if (value is double) return value.toInt();
+  if (value is String) return int.tryParse(value) ?? fallback;
+  if (value is Map) {
+    if (value.containsKey(r'$numberInt')) {
+      return int.tryParse(value[r'$numberInt'].toString()) ?? fallback;
+    }
+    if (value.containsKey(r'$numberLong')) {
+      return int.tryParse(value[r'$numberLong'].toString()) ?? fallback;
+    }
+  }
+  return fallback;
+}
+
+bool _asBool(dynamic value, [bool fallback = false]) {
+  if (value == null) return fallback;
+  if (value is bool) return value;
+  if (value is String) return value.toLowerCase() == 'true';
+  return fallback;
+}
+
+/// Safely converts a dynamic list into List<String>, coercing each element
+/// individually instead of doing a blind cast (which throws on a single
+/// bad element, e.g. Vec<ObjectId> on the Rust side leaking through as
+/// [{"$oid": "..."}, ...] instead of ["...", ...]).
+List<String> _asStringList(dynamic value) {
+  if (value is! List) return [];
+  return value.map((e) => _asString(e)).where((s) => s.isNotEmpty).toList();
+}
+
+DateTime? _asDateTime(dynamic value) {
+  if (value == null) return null;
+  final s = _asString(value);
+  if (s.isEmpty) return null;
+  return DateTime.tryParse(s);
+}
+
+// ============================================================================
+// USER CHANNEL MODEL
+// ============================================================================
+
 class UserChannel {
   final String channelId;
   final String name;
@@ -32,47 +104,60 @@ class UserChannel {
   });
 
   factory UserChannel.fromJson(Map<String, dynamic> json) {
-    final List<dynamic> membersData = json['members'] ?? [];
-    final List<ChannelMember> members = membersData
-        .map((m) => ChannelMember.fromJson(m as Map<String, dynamic>))
-        .toList();
+    // Never let one malformed record take down the whole list —
+    // parse defensively and fall back to safe defaults on any failure.
+    try {
+      final List<dynamic> membersData = json['members'] is List ? json['members'] : [];
+      final List<ChannelMember> members = membersData
+          .whereType<Map>()
+          .map((m) => ChannelMember.fromJson(Map<String, dynamic>.from(m)))
+          .toList();
 
-    final bool isApproved =
-        json['isApproved'] ?? json['is_approved'] ?? json['approved'] ?? false;
+      final bool isApproved = _asBool(
+        json['isApproved'] ?? json['is_approved'] ?? json['approved'],
+        false,
+      );
 
-    final bool isActive = json['isActive'] ?? json['is_active'] ?? true;
+      final bool isActive = _asBool(
+        json['isActive'] ?? json['is_active'],
+        true,
+      );
 
-    final bool hasAdmin = members.any((m) => m.isAdmin);
+      final bool hasAdmin = members.any((m) => m.isAdmin);
 
-    DateTime? joinedAt;
-    if (json['joinedAt'] != null) {
-      joinedAt = DateTime.tryParse(json['joinedAt'].toString());
-    } else if (json['joined_at'] != null) {
-      joinedAt = DateTime.tryParse(json['joined_at'].toString());
-    }
+      final DateTime? joinedAt =
+          _asDateTime(json['joinedAt'] ?? json['joined_at']);
 
-    return UserChannel(
-      channelId:
-          json['channel_id']?.toString() ?? json['channelId']?.toString() ?? '',
-      name: json['name']?.toString() ??
-          json['channelName']?.toString() ??
+      return UserChannel(
+        channelId: _asString(json['channel_id'] ?? json['channelId']),
+        name: _asString(
+          json['name'] ?? json['channelName'],
           'Unknown Channel',
-      memberCount:
-          json['member_count']?.toInt() ?? json['memberCount']?.toInt() ?? 0,
-      season: json['season']?.toString() ?? '',
-      isAdmin: hasAdmin,
-      admins: json['admins'] != null ? List<String>.from(json['admins']) : null,
-      memberIds:
-          members.map((m) => m.userId).where((id) => id.isNotEmpty).toList(),
-      inviteCode: json['invite_code']?.toString() ??
-          json['inviteCode']?.toString() ??
-          '',
-      members: members,
-      isApproved: isApproved,
-      isActive: isActive,
-      description: json['description']?.toString(),
-      joinedAt: joinedAt,
-    );
+        ),
+        memberCount: _asInt(json['member_count'] ?? json['memberCount']),
+        season: _asString(json['season']),
+        isAdmin: hasAdmin,
+        admins: (json['admins'] != null) ? _asStringList(json['admins']) : null,
+        memberIds:
+            members.map((m) => m.userId).where((id) => id.isNotEmpty).toList(),
+        inviteCode: _asString(json['invite_code'] ?? json['inviteCode']),
+        members: members,
+        isApproved: isApproved,
+        isActive: isActive,
+        description: json['description'] != null ? _asString(json['description']) : null,
+        joinedAt: joinedAt,
+      );
+    } catch (e, st) {
+      // Last-resort fallback so one bad record never blanks the whole page.
+      // ignore: avoid_print
+      print('⚠️ UserChannel.fromJson failed, returning safe fallback: $e\n$st\nraw: $json');
+      return UserChannel(
+        channelId: _asString(json['channel_id'] ?? json['channelId']),
+        name: 'Unknown Channel',
+        memberCount: 0,
+        season: '',
+      );
+    }
   }
 
   Map<String, dynamic> toJson() => {
@@ -153,6 +238,10 @@ class UserChannel {
   }
 }
 
+// ============================================================================
+// CHANNEL MEMBER MODEL
+// ============================================================================
+
 class ChannelMember {
   final String userId;
   final String username;
@@ -175,24 +264,35 @@ class ChannelMember {
   });
 
   factory ChannelMember.fromJson(Map<String, dynamic> json) {
-    return ChannelMember(
-      userId: json['user_id']?.toString() ?? json['userId']?.toString() ?? '',
-      username: json['username']?.toString() ??
-          json['user_name']?.toString() ??
+    try {
+      return ChannelMember(
+        userId: _asString(json['user_id'] ?? json['userId']),
+        username: _asString(
+          json['username'] ?? json['user_name'],
           'Anonymous',
-      role: json['role']?.toString()?.toLowerCase() ?? 'member',
-      joinedAt: DateTime.tryParse(json['joined_at']?.toString() ??
-              json['joinedAt']?.toString() ??
-              '') ??
-          DateTime.now(),
-      seasonPoints:
-          json['season_points']?.toInt() ?? json['seasonPoints']?.toInt() ?? 0,
-      correctVotes:
-          json['correct_votes']?.toInt() ?? json['correctVotes']?.toInt() ?? 0,
-      totalVotes:
-          json['total_votes']?.toInt() ?? json['totalVotes']?.toInt() ?? 0,
-      msgCount: json['msg_count']?.toInt() ?? json['msgCount']?.toInt() ?? 0,
-    );
+        ),
+        role: _asString(json['role'], 'member').toLowerCase(),
+        joinedAt: _asDateTime(json['joined_at'] ?? json['joinedAt']) ??
+            DateTime.now(),
+        seasonPoints: _asInt(json['season_points'] ?? json['seasonPoints']),
+        correctVotes: _asInt(json['correct_votes'] ?? json['correctVotes']),
+        totalVotes: _asInt(json['total_votes'] ?? json['totalVotes']),
+        msgCount: _asInt(json['msg_count'] ?? json['msgCount']),
+      );
+    } catch (e, st) {
+      // ignore: avoid_print
+      print('⚠️ ChannelMember.fromJson failed, returning safe fallback: $e\n$st\nraw: $json');
+      return ChannelMember(
+        userId: _asString(json['user_id'] ?? json['userId']),
+        username: 'Anonymous',
+        role: 'member',
+        joinedAt: DateTime.now(),
+        seasonPoints: 0,
+        correctVotes: 0,
+        totalVotes: 0,
+        msgCount: 0,
+      );
+    }
   }
 
   Map<String, dynamic> toJson() => {
