@@ -93,14 +93,20 @@ class WebChannelMember {
 }
 
 // ============================================================================
-// WEB PROFILE PANEL - SELF CONTAINED
+// WEB PROFILE PANEL - SUPPORTS BOTH OWN AND OTHER USER PROFILES
 // ============================================================================
 
 class WebProfilePanel extends StatefulWidget {
+  final String? userId;
+  final String? username;
+  final String? phone;
   final VoidCallback? onLogout;
 
   const WebProfilePanel({
     super.key,
+    this.userId,
+    this.username,
+    this.phone,
     this.onLogout,
   });
 
@@ -111,30 +117,28 @@ class WebProfilePanel extends StatefulWidget {
 class _WebProfilePanelState extends State<WebProfilePanel>
     with SingleTickerProviderStateMixin {
   // ==========================================================================
-  // STATE - SELF CONTAINED
+  // STATE
   // ==========================================================================
 
-  // Auth
   final AuthService _authService = AuthService();
-  String get _userId => _authService.userId ?? '';
-  String get _username => _authService.username ?? '';
-  String get _phone => _authService.phone ?? '';
-  bool get _isLoggedIn => _authService.isLoggedIn;
 
-  // Profile data
+  String get _viewingUserId => widget.userId ?? _authService.userId ?? '';
+  String get _viewingUsername => widget.username ?? _authService.username ?? '';
+  String get _viewingPhone => widget.phone ?? _authService.phone ?? '';
+
+  bool get _isCurrentUser => _viewingUserId == _authService.userId;
+
   WebUserData? _userData;
   bool _isLoading = true;
   bool _isEditing = false;
   bool _isSaving = false;
   bool _isLoggingOut = false;
 
-  // Channels
   List<UserChannel> _userChannels = [];
   bool _isChannelsLoading = true;
   late TabController _tabController;
   int _selectedTab = 0;
 
-  // Text controllers
   late TextEditingController _nicknameController;
   late TextEditingController _clubController;
   late TextEditingController _countryController;
@@ -142,11 +146,9 @@ class _WebProfilePanelState extends State<WebProfilePanel>
   final FocusNode _clubFocus = FocusNode();
   final FocusNode _countryFocus = FocusNode();
 
-  // Balance
   double _balance = 0.0;
   bool _isBalanceLoading = true;
 
-  // Payment
   bool _isProcessingPayment = false;
   bool _isWithdrawing = false;
   String? _authToken;
@@ -196,7 +198,7 @@ class _WebProfilePanelState extends State<WebProfilePanel>
   // ==========================================================================
 
   Future<void> _loadAllData() async {
-    if (!_isLoggedIn) {
+    if (_viewingUserId.isEmpty) {
       setState(() {
         _isLoading = false;
         _isChannelsLoading = false;
@@ -211,22 +213,22 @@ class _WebProfilePanelState extends State<WebProfilePanel>
       _loadUserChannels(),
     ]);
 
-    if (_isLoggedIn) {
+    if (_isCurrentUser) {
       _initPaymentGate();
     }
   }
 
   Future<void> _loadUserData() async {
-    if (!_isLoggedIn) return;
+    if (_viewingUserId.isEmpty) return;
 
     setState(() => _isLoading = true);
 
-    // Instant paint from AppCache
-    if (AppCache.profile != null &&
+    if (_isCurrentUser &&
+        AppCache.profile != null &&
         (AppCache.profile!['user_id']?.toString() ??
                 AppCache.profile!['userId']?.toString() ??
                 '') ==
-            _userId) {
+            _viewingUserId) {
       try {
         final cachedUser = WebUserData.fromJson(AppCache.profile!);
         _applyUserData(cachedUser);
@@ -240,7 +242,7 @@ class _WebProfilePanelState extends State<WebProfilePanel>
     try {
       final response = await http
           .get(
-            Uri.parse('$_apiBaseUrl/profile/profile/$_userId'),
+            Uri.parse('$_apiBaseUrl/profile/profile/$_viewingUserId'),
             headers: _headers(),
           )
           .timeout(_timeout);
@@ -254,29 +256,29 @@ class _WebProfilePanelState extends State<WebProfilePanel>
           if (decoded.isEmpty) {
             setState(() {
               _isLoading = false;
-              _isEditing = true;
+              _isEditing = _isCurrentUser;
             });
             return;
           }
           final userMap = Map<String, dynamic>.from(decoded.first as Map);
           final user = WebUserData.fromJson(userMap);
           _applyUserData(user);
-          await AppCache.saveProfile(userMap);
+          if (_isCurrentUser) await AppCache.saveProfile(userMap);
         } else if (decoded is Map) {
           final userMap = Map<String, dynamic>.from(decoded);
           final user = WebUserData.fromJson(userMap);
           _applyUserData(user);
-          await AppCache.saveProfile(userMap);
+          if (_isCurrentUser) await AppCache.saveProfile(userMap);
         } else {
           setState(() {
             _isLoading = false;
-            _isEditing = true;
+            _isEditing = _isCurrentUser;
           });
         }
       } else if (response.statusCode == 404) {
         setState(() {
           _isLoading = false;
-          _isEditing = true;
+          _isEditing = _isCurrentUser;
         });
       } else {
         if (_userData == null) {
@@ -292,7 +294,7 @@ class _WebProfilePanelState extends State<WebProfilePanel>
   }
 
   Future<void> _loadUserChannels() async {
-    if (!_isLoggedIn) {
+    if (_viewingUserId.isEmpty) {
       setState(() {
         _userChannels = [];
         _isChannelsLoading = false;
@@ -311,7 +313,7 @@ class _WebProfilePanelState extends State<WebProfilePanel>
 
       final response = await http
           .get(
-            Uri.parse('$_apiBaseUrl/channels/user/$_userId'),
+            Uri.parse('$_apiBaseUrl/channels/user/$_viewingUserId'),
             headers: headers,
           )
           .timeout(const Duration(seconds: 10));
@@ -328,7 +330,6 @@ class _WebProfilePanelState extends State<WebProfilePanel>
           _isChannelsLoading = false;
         });
 
-        // Update tab controller
         final newCount = channels.length.clamp(0, 3);
         if (newCount != _tabController.length) {
           _tabController.dispose();
@@ -367,7 +368,7 @@ class _WebProfilePanelState extends State<WebProfilePanel>
   }
 
   // ==========================================================================
-  // PAYMENT GATE
+  // PAYMENT GATE - ONLY FOR CURRENT USER
   // ==========================================================================
 
   Future<void> _initPaymentGate() async {
@@ -379,7 +380,7 @@ class _WebProfilePanelState extends State<WebProfilePanel>
   }
 
   Future<void> _checkPaymentVisibility() async {
-    if (!_isLoggedIn) {
+    if (!_isCurrentUser) {
       setState(() => _showPaymentFeatures = false);
       return;
     }
@@ -410,12 +411,12 @@ class _WebProfilePanelState extends State<WebProfilePanel>
   }
 
   Future<void> _fetchBalance() async {
-    if (!_isLoggedIn) return;
+    if (!_isCurrentUser) return;
     setState(() => _isBalanceLoading = true);
 
     try {
       final balance = await PaymentService.getUserBalance(
-        userId: _userId,
+        userId: _viewingUserId,
         authToken: _authToken,
         forceRefresh: true,
       );
@@ -454,11 +455,14 @@ class _WebProfilePanelState extends State<WebProfilePanel>
   }
 
   // ==========================================================================
-  // SAVE PROFILE
+  // SAVE PROFILE - ONLY FOR CURRENT USER
   // ==========================================================================
 
   Future<void> _saveProfile() async {
-    if (!_isLoggedIn) return;
+    if (!_isCurrentUser) {
+      ToastHelper.showWarning('You can only edit your own profile');
+      return;
+    }
 
     final nickname = _nicknameController.text.trim();
     final club = _clubController.text.trim();
@@ -481,9 +485,9 @@ class _WebProfilePanelState extends State<WebProfilePanel>
 
     try {
       final body = {
-        'user_id': _userId,
-        'username': _username,
-        'phone': _phone,
+        'user_id': _viewingUserId,
+        'username': _viewingUsername,
+        'phone': _viewingPhone,
         'nickname': nickname,
         'club_fan': club,
         'country_fan': country,
@@ -495,7 +499,7 @@ class _WebProfilePanelState extends State<WebProfilePanel>
 
       final url = isNewUser
           ? '$_apiBaseUrl/profile/create_profile'
-          : '$_apiBaseUrl/profile/profiles/$_userId';
+          : '$_apiBaseUrl/profile/profiles/$_viewingUserId';
 
       final response = isNewUser
           ? await http
@@ -580,10 +584,11 @@ class _WebProfilePanelState extends State<WebProfilePanel>
   }
 
   // ==========================================================================
-  // LOGOUT
+  // LOGOUT - ONLY FOR CURRENT USER
   // ==========================================================================
 
   Future<void> _logout() async {
+    if (!_isCurrentUser) return;
     if (_isLoggingOut) return;
     setState(() => _isLoggingOut = true);
 
@@ -611,7 +616,7 @@ class _WebProfilePanelState extends State<WebProfilePanel>
   // ==========================================================================
 
   String _getInitials() {
-    final name = _userData?.nickname ?? _username;
+    final name = _userData?.nickname ?? _viewingUsername;
     return name.isNotEmpty ? name[0].toUpperCase() : '?';
   }
 
@@ -639,7 +644,9 @@ class _WebProfilePanelState extends State<WebProfilePanel>
             ),
             const SizedBox(height: 8),
             Text(
-              'No channels joined',
+              _isCurrentUser
+                  ? 'No channels joined'
+                  : '${_viewingUsername} has no channels',
               style: FanTypography.body.copyWith(
                 fontSize: 11,
                 color: FanColors.textTertiary.withOpacity(0.5),
@@ -667,7 +674,6 @@ class _WebProfilePanelState extends State<WebProfilePanel>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Channel header
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
@@ -686,7 +692,9 @@ class _WebProfilePanelState extends State<WebProfilePanel>
                   ),
                   child: Center(
                     child: Text(
-                      channel.name.isNotEmpty ? channel.name[0].toUpperCase() : '?',
+                      channel.name.isNotEmpty
+                          ? channel.name[0].toUpperCase()
+                          : '?',
                       style: const TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
@@ -758,8 +766,6 @@ class _WebProfilePanelState extends State<WebProfilePanel>
             ),
           ),
           const SizedBox(height: 6),
-
-          // Members list
           Expanded(
             child: sortedMembers.isEmpty
                 ? Center(
@@ -796,7 +802,6 @@ class _WebProfilePanelState extends State<WebProfilePanel>
                         ),
                         child: Row(
                           children: [
-                            // Rank
                             Container(
                               width: 18,
                               alignment: Alignment.center,
@@ -814,8 +819,6 @@ class _WebProfilePanelState extends State<WebProfilePanel>
                                     ),
                             ),
                             const SizedBox(width: 4),
-
-                            // Avatar
                             Container(
                               width: 20,
                               height: 20,
@@ -837,8 +840,6 @@ class _WebProfilePanelState extends State<WebProfilePanel>
                               ),
                             ),
                             const SizedBox(width: 6),
-
-                            // Name
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -881,8 +882,6 @@ class _WebProfilePanelState extends State<WebProfilePanel>
                                 ],
                               ),
                             ),
-
-                            // Points
                             Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 4,
@@ -1210,28 +1209,29 @@ class _WebProfilePanelState extends State<WebProfilePanel>
           value: _userData!.phone.isNotEmpty ? _userData!.phone : 'Not set',
         ),
         const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(
-              child: _buildActionButton(
-                label: 'Edit',
-                icon: Icons.edit_outlined,
-                onTap: () => setState(() => _isEditing = true),
-                isPrimary: true,
+        if (_isCurrentUser)
+          Row(
+            children: [
+              Expanded(
+                child: _buildActionButton(
+                  label: 'Edit',
+                  icon: Icons.edit_outlined,
+                  onTap: () => setState(() => _isEditing = true),
+                  isPrimary: true,
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: _buildActionButton(
-                label: 'Logout',
-                icon: Icons.logout_outlined,
-                onTap: _logout,
-                isPrimary: false,
-                isLoading: _isLoggingOut,
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildActionButton(
+                  label: 'Logout',
+                  icon: Icons.logout_outlined,
+                  onTap: _logout,
+                  isPrimary: false,
+                  isLoading: _isLoggingOut,
+                ),
               ),
-            ),
-          ],
-        ),
+            ],
+          ),
       ],
     );
   }
@@ -1260,7 +1260,7 @@ class _WebProfilePanelState extends State<WebProfilePanel>
         const SizedBox(height: 12),
         Center(
           child: Text(
-            'Complete Your Profile',
+            _isCurrentUser ? 'Complete Your Profile' : 'No profile available',
             style: FanTypography.title.copyWith(
               fontSize: 14,
               color: FanColors.textPrimary,
@@ -1270,47 +1270,61 @@ class _WebProfilePanelState extends State<WebProfilePanel>
         const SizedBox(height: 2),
         Center(
           child: Text(
-            'Tell us about yourself',
+            _isCurrentUser
+                ? 'Tell us about yourself'
+                : 'This user has not set up their profile yet',
             style: FanTypography.caption.copyWith(
               color: FanColors.textTertiary,
             ),
           ),
         ),
         const SizedBox(height: 16),
-        _buildTextField(
-          controller: _nicknameController,
-          focusNode: _nicknameFocus,
-          label: 'TEAM NICKNAME',
-          hint: 'e.g., Red Devils, The Gunners',
-          icon: Icons.shield_outlined,
-          onSubmitted: () => _clubFocus.requestFocus(),
-        ),
-        const SizedBox(height: 10),
-        _buildTextField(
-          controller: _clubController,
-          focusNode: _clubFocus,
-          label: 'FAVORITE CLUB',
-          hint: 'Which club do you support?',
-          icon: Icons.sports_soccer_outlined,
-          onSubmitted: () => _countryFocus.requestFocus(),
-        ),
-        const SizedBox(height: 10),
-        _buildTextField(
-          controller: _countryController,
-          focusNode: _countryFocus,
-          label: 'COUNTRY',
-          hint: 'Country you support?',
-          icon: Icons.flag_outlined,
-          onSubmitted: _unfocusAll,
-        ),
-        const SizedBox(height: 16),
-        _buildActionButton(
-          label: 'Complete Profile',
-          icon: Icons.check_circle_outline,
-          onTap: _saveProfile,
-          isPrimary: true,
-          isLoading: _isSaving,
-        ),
+        if (_isCurrentUser) ...[
+          _buildTextField(
+            controller: _nicknameController,
+            focusNode: _nicknameFocus,
+            label: 'TEAM NICKNAME',
+            hint: 'e.g., Red Devils, The Gunners',
+            icon: Icons.shield_outlined,
+            onSubmitted: () => _clubFocus.requestFocus(),
+          ),
+          const SizedBox(height: 10),
+          _buildTextField(
+            controller: _clubController,
+            focusNode: _clubFocus,
+            label: 'FAVORITE CLUB',
+            hint: 'Which club do you support?',
+            icon: Icons.sports_soccer_outlined,
+            onSubmitted: () => _countryFocus.requestFocus(),
+          ),
+          const SizedBox(height: 10),
+          _buildTextField(
+            controller: _countryController,
+            focusNode: _countryFocus,
+            label: 'COUNTRY',
+            hint: 'Country you support?',
+            icon: Icons.flag_outlined,
+            onSubmitted: _unfocusAll,
+          ),
+          const SizedBox(height: 16),
+          _buildActionButton(
+            label: 'Complete Profile',
+            icon: Icons.check_circle_outline,
+            onTap: _saveProfile,
+            isPrimary: true,
+            isLoading: _isSaving,
+          ),
+        ] else ...[
+          Center(
+            child: Text(
+              'No profile information available',
+              style: FanTypography.body.copyWith(
+                color: FanColors.textSecondary,
+                fontSize: 12,
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -1399,8 +1413,7 @@ class _WebProfilePanelState extends State<WebProfilePanel>
 
   @override
   Widget build(BuildContext context) {
-    // Not logged in
-    if (!_isLoggedIn) {
+    if (_viewingUserId.isEmpty) {
       return Container(
         width: 240,
         decoration: BoxDecoration(
@@ -1423,26 +1436,26 @@ class _WebProfilePanelState extends State<WebProfilePanel>
               ),
               const SizedBox(height: 8),
               Text(
-                'Not logged in',
+                _isCurrentUser ? 'Not logged in' : 'User not found',
                 style: TextStyle(
                   color: FanColors.textSecondary,
                   fontSize: 12,
                 ),
               ),
               const SizedBox(height: 8),
-              ElevatedButton(
-                onPressed: () {
-                  // Navigate to login
-                },
-                child: const Text('Login'),
-              ),
+              if (_isCurrentUser)
+                ElevatedButton(
+                  onPressed: () {
+                    // Navigate to login
+                  },
+                  child: const Text('Login'),
+                ),
             ],
           ),
         ),
       );
     }
 
-    // Loading state
     if (_isLoading || _isCheckingVisibility || _isChannelsLoading) {
       return Container(
         width: 240,
@@ -1463,7 +1476,6 @@ class _WebProfilePanelState extends State<WebProfilePanel>
 
     final channelCount = _userChannels.length.clamp(0, 3);
 
-    // Main content
     return Container(
       width: 240,
       decoration: BoxDecoration(
@@ -1513,7 +1525,7 @@ class _WebProfilePanelState extends State<WebProfilePanel>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        _userData?.nickname ?? _username,
+                        _userData?.nickname ?? _viewingUsername,
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
@@ -1523,7 +1535,7 @@ class _WebProfilePanelState extends State<WebProfilePanel>
                         overflow: TextOverflow.ellipsis,
                       ),
                       Text(
-                        '@$_username',
+                        '@$_viewingUsername',
                         style: TextStyle(
                           fontSize: 10,
                           color: FanColors.textTertiary,
@@ -1545,10 +1557,12 @@ class _WebProfilePanelState extends State<WebProfilePanel>
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Column(
                 children: [
-                  // Balance card
-                  if (_showPaymentFeatures && _userData != null)
+                  // Balance card - only for current user
+                  if (_isCurrentUser &&
+                      _showPaymentFeatures &&
+                      _userData != null)
                     Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.only(bottom: 8),
                       child: _buildBalanceCard(),
                     ),
 
@@ -1561,11 +1575,13 @@ class _WebProfilePanelState extends State<WebProfilePanel>
                     _buildNoProfileView(),
                   ],
 
-                  // Channels Section
+                  // ✅ Channels Section - small margin
                   if (_userData != null && channelCount > 0) ...[
-                    const Divider(height: 16),
+                    const SizedBox(height: 6),
+                    const Divider(height: 1),
+                    const SizedBox(height: 4),
                     Container(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      padding: const EdgeInsets.symmetric(vertical: 2),
                       child: Row(
                         children: [
                           Icon(
@@ -1585,10 +1601,9 @@ class _WebProfilePanelState extends State<WebProfilePanel>
                           const Spacer(),
                           Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 2),
+                                horizontal: 6, vertical: 1),
                             decoration: BoxDecoration(
-                              color:
-                                  FanColors.primary.withValues(alpha: 0.15),
+                              color: FanColors.primary.withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: Text(
@@ -1603,14 +1618,14 @@ class _WebProfilePanelState extends State<WebProfilePanel>
                         ],
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 2),
                   ],
                 ],
               ),
             ),
           ),
 
-          // Channel Tab Bar (fixed at bottom)
+          // Channel Tab Bar (fixed at bottom) - Swipeable
           if (!_isLoading && !_isCheckingVisibility && channelCount > 0) ...[
             _buildChannelTabBar(),
             const SizedBox(height: 2),
