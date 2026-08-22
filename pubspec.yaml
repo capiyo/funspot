@@ -78,9 +78,9 @@ flutter:
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "assets/icons/lasta.png"
+  image_path: "assets/icons/funspot.png"
   adaptive_icon_background: "#121A30"
-  adaptive_icon_foreground: "assets/icons/lasta.png"
+  adaptive_icon_foreground: "assets/icons/funspot.png"
   remove_alpha_ios: true
 
 
@@ -94,10 +94,10 @@ flutter_launcher_icons:
 # will agree by the time the first real Flutter frame renders.
 flutter_native_splash:
   color: "#FFFFFF"
-  image: assets/icons/lasta.png
+  image: assets/icons/funspot.png
 
   color_dark: "#121A30"
-  image_dark: assets/icons/lasta.png
+  image_dark: assets/icons/funspot.png
 
   android_gravity: center
   ios_content_mode: center
@@ -106,8 +106,8 @@ flutter_native_splash:
   ios: true
 
   android_12:
-    image: assets/icons/lasta.png
+    image: assets/icons/funspot.png
     icon_background_color: "#FFFFFF"
 
-    image_dark: assets/icons/lasta.png
+    image_dark: assets/icons/funspot.png
     icon_background_color_dark: "#121A30"
