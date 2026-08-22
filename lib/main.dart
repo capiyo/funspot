@@ -1912,7 +1912,9 @@ class AppCache {
       developer.log('✅ AppCache: Refresh complete', name: 'AppCache');
     }
   }
-
+    // ==========================================================================
+  // REFRESH FIXTURES WITH TIME - DIFFED (only notifies on real change)
+  // ==========================================================================
   static Future<void> refreshFixturesWithTime() async {
     try {
       final response = await http.get(
@@ -1924,7 +1926,23 @@ class AppCache {
         final data = json.decode(response.body);
         final List<dynamic> fixturesData =
             data['data'] ?? data['fixtures'] ?? [];
-        fixtures = fixturesData.map((f) => Fixture.fromJson(f)).toList();
+        final newFixtures =
+            fixturesData.map((f) => Fixture.fromJson(f)).toList();
+
+        // ✅ Compare against what's currently held before touching anything.
+        // A JSON-based compare avoids requiring Fixture to implement ==/hashCode
+        // itself — if two payloads serialize identically, nothing changed.
+        final bool changed = !_fixtureListsEqual(fixtures, newFixtures);
+
+        if (!changed) {
+          if (kDebugMode) {
+            developer.log('⏭️ Fixtures refresh: no changes, skipping repaint',
+                name: 'AppCache');
+          }
+          return;
+        }
+
+        fixtures = newFixtures;
 
         for (var f in fixtures) {
           if (f.isLive && f.timeElapsed != null) {
@@ -1940,7 +1958,7 @@ class AppCache {
         _fixturesController.add(fixtures);
         if (kDebugMode) {
           developer.log(
-              '✅ AppCache: Refreshed ${fixtures.length} fixtures with timeElapsed',
+              '✅ AppCache: Refreshed ${fixtures.length} fixtures (changed)',
               name: 'AppCache');
         }
       }
@@ -1949,6 +1967,160 @@ class AppCache {
           name: 'AppCache');
     }
   }
+
+  // Structural compare via toJson() — cheap, no need to touch the Fixture
+  // model. Order-sensitive on purpose: if the API reorders fixtures, that's
+  // a real change worth repainting for.
+  static bool _fixtureListsEqual(List<Fixture> a, List<Fixture> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (json.encode(a[i].toJson()) != json.encode(b[i].toJson())) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // ==========================================================================
+  // REFRESH CHANNELS - DIFFED
+  // ==========================================================================
+  static Future<void> refreshChannels(String userId, String? authToken) async {
+    try {
+      final headers = {'Content-Type': 'application/json'};
+      if (authToken != null && authToken.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $authToken';
+      }
+
+      final response = await http
+          .get(
+            Uri.parse(
+                'https://clash-api-m5mr.onrender.com/api/channels/user/$userId'),
+            headers: headers,
+          )
+          .timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final List<dynamic> channelsData = data['channels'] ?? [];
+        final newChannels = channelsData
+            .map((c) => UserChannel.fromJson(c as Map<String, dynamic>))
+            .toList();
+
+        final bool changed = channels.length != newChannels.length ||
+            !_listsEqualByJson(
+              channels.map((c) => c.toJson()).toList(),
+              newChannels.map((c) => c.toJson()).toList(),
+            );
+
+        if (!changed) {
+          if (kDebugMode) {
+            developer.log('⏭️ Channels refresh: no changes, skipping repaint',
+                name: 'AppCache');
+          }
+          return;
+        }
+
+        channels = newChannels;
+        await saveChannels(channels);
+        _fixturesController.add(fixtures); // existing behavior preserved
+        if (kDebugMode) {
+          developer.log(
+              '✅ AppCache: Refreshed ${channels.length} channels (changed)',
+              name: 'AppCache');
+        }
+      }
+    } catch (e) {
+      developer.log('❌ AppCache: Failed to refresh channels: $e',
+          name: 'AppCache');
+    }
+  }
+
+  // ==========================================================================
+  // REFRESH COMRADES - DIFFED
+  // ==========================================================================
+  static Future<void> refreshComrades(String? authToken) async {
+    try {
+      final headers = {'Content-Type': 'application/json'};
+      if (authToken != null && authToken.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $authToken';
+      }
+
+      final response = await http
+          .get(
+            Uri.parse(
+                'https://clash-api-m5mr.onrender.com/api/profile/profiles'),
+            headers: headers,
+          )
+          .timeout(const Duration(seconds: 30));
+
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        final List<Map<String, dynamic>> profiles =
+            data.cast<Map<String, dynamic>>();
+
+        final authService = AuthService();
+        final userId = authService.userId;
+
+        List<Map<String, dynamic>> availableUsers;
+        if (userId != null && userId.isNotEmpty) {
+          availableUsers = profiles
+              .where((profile) => profile['user_id']?.toString() != userId)
+              .toList();
+        } else {
+          availableUsers = List.from(profiles);
+        }
+
+        final newComrades = availableUsers
+            .map((item) => {
+                  'id': item['user_id']?.toString() ?? '',
+                  'nickname': item['nickname']?.toString() ??
+                      item['username']?.toString() ??
+                      'Fan',
+                  'club': item['club_fan']?.toString() ?? 'Football Fan',
+                  'country': item['country_fan']?.toString() ?? 'World',
+                  'username': item['username']?.toString() ?? 'user',
+                })
+            .toList();
+
+        final bool changed = !_listsEqualByJson(comrades, newComrades);
+
+        if (!changed) {
+          if (kDebugMode) {
+            developer.log('⏭️ Comrades refresh: no changes, skipping repaint',
+                name: 'AppCache');
+          }
+          return;
+        }
+
+        comrades = newComrades;
+
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('cached_comrades', jsonEncode(comrades));
+        if (kDebugMode) {
+          developer.log(
+              '✅ AppCache: Refreshed ${comrades.length} comrades (changed)',
+              name: 'AppCache');
+        }
+      }
+    } catch (e) {
+      developer.log('❌ AppCache: Failed to refresh comrades: $e',
+          name: 'AppCache');
+    }
+  }
+
+  // Generic structural compare for List<Map<String, dynamic>> payloads.
+  static bool _listsEqualByJson(
+    List<Map<String, dynamic>> a,
+    List<Map<String, dynamic>> b,
+  ) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (json.encode(a[i]) != json.encode(b[i])) return false;
+    }
+    return true;
+  }
+
+ 
 
   static Future<void> _refreshProfile(String userId, String? authToken) async {
     try {
@@ -1990,96 +2162,7 @@ class AppCache {
     }
   }
 
-  static Future<void> refreshChannels(String userId, String? authToken) async {
-    try {
-      final headers = {'Content-Type': 'application/json'};
-      if (authToken != null && authToken.isNotEmpty) {
-        headers['Authorization'] = 'Bearer $authToken';
-      }
-
-      final response = await http
-          .get(
-            Uri.parse(
-                'https://clash-api-m5mr.onrender.com/api/channels/user/$userId'),
-            headers: headers,
-          )
-          .timeout(const Duration(seconds: 10));
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final List<dynamic> channelsData = data['channels'] ?? [];
-        channels = channelsData
-            .map((c) => UserChannel.fromJson(c as Map<String, dynamic>))
-            .toList();
-        await saveChannels(channels);
-        _fixturesController.add(fixtures);
-        if (kDebugMode) {
-          developer.log('✅ AppCache: Refreshed ${channels.length} channels',
-              name: 'AppCache');
-        }
-      }
-    } catch (e) {
-      developer.log('❌ AppCache: Failed to refresh channels: $e',
-          name: 'AppCache');
-    }
-  }
-
-  static Future<void> refreshComrades(String? authToken) async {
-    try {
-      final headers = {'Content-Type': 'application/json'};
-      if (authToken != null && authToken.isNotEmpty) {
-        headers['Authorization'] = 'Bearer $authToken';
-      }
-
-      final response = await http
-          .get(
-            Uri.parse(
-                'https://clash-api-m5mr.onrender.com/api/profile/profiles'),
-            headers: headers,
-          )
-          .timeout(const Duration(seconds: 30));
-
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
-        final List<Map<String, dynamic>> profiles =
-            data.cast<Map<String, dynamic>>();
-
-        final authService = AuthService();
-        final userId = authService.userId;
-
-        List<Map<String, dynamic>> availableUsers;
-        if (userId != null && userId.isNotEmpty) {
-          availableUsers = profiles
-              .where((profile) => profile['user_id']?.toString() != userId)
-              .toList();
-        } else {
-          availableUsers = List.from(profiles);
-        }
-
-        comrades = availableUsers
-            .map((item) => {
-                  'id': item['user_id']?.toString() ?? '',
-                  'nickname': item['nickname']?.toString() ??
-                      item['username']?.toString() ??
-                      'Fan',
-                  'club': item['club_fan']?.toString() ?? 'Football Fan',
-                  'country': item['country_fan']?.toString() ?? 'World',
-                  'username': item['username']?.toString() ?? 'user',
-                })
-            .toList();
-
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('cached_comrades', jsonEncode(comrades));
-        if (kDebugMode) {
-          developer.log('✅ AppCache: Refreshed ${comrades.length} comrades',
-              name: 'AppCache');
-        }
-      }
-    } catch (e) {
-      developer.log('❌ AppCache: Failed to refresh comrades: $e',
-          name: 'AppCache');
-    }
-  }
+  
 
   static Future<void> _refreshUserVotes(
       String userId, String? authToken) async {
@@ -3864,6 +3947,8 @@ void _loadHeavyDataInBackground() {
         authToken: authService.authToken);
   });
 }
+
+
 
 // ============================================================================
 // MAIN ENTRY POINT - FAST STARTUP

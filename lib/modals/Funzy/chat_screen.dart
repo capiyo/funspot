@@ -4,10 +4,12 @@
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+import 'dart:io' if (dart.library.html) '../../utils/io_stub.dart';
 
 import 'package:flutter/material.dart';
+import '../../utils/videos/video_thumbnail_generator.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show kIsWeb, kDebugMode;
 import "../FAB/profile_modal.dart";
 import 'package:intl/intl.dart';
 import '../Funzy/aftermatch_modal.dart'; // ✅ NEW
@@ -2078,6 +2080,189 @@ static const Duration _commentaryFetchCooldown = Duration(seconds: 20);
 // ============================================================================
 
   /// ✅ Show caption dialog after selecting image
+ 
+ Future<void> _pickAndSendVideo() async {
+  if (_isUploadingMedia) return;
+
+  final XFile? video = await _picker.pickVideo(source: ImageSource.gallery);
+  if (video == null) return;
+
+  final caption = await _showCaptionDialog(
+    hintText: 'Add a caption to your video...',
+    isImage: false,
+  );
+
+  if (caption == null) return;
+
+  setState(() => _isUploadingMedia = true);
+
+  try {
+    final videoBytes = await video.readAsBytes();
+
+    Uint8List? thumbnailBytes;
+    String thumbnailName =
+        'thumb_${DateTime.now().millisecondsSinceEpoch}.jpg';
+
+    if (kIsWeb) {
+      // Try a real client-side frame grab first — loads the video into a
+      // hidden <video> element, seeks in, and draws to a <canvas>.
+      final webThumb = await generateWebVideoThumbnail(
+        videoBytes,
+        maxWidth: 400,
+        quality: 0.75,
+      );
+
+      if (webThumb != null) {
+        thumbnailBytes = webThumb;
+      } else {
+        // Frame grab failed (unsupported codec in this browser, etc.) —
+        // fall back to a 1x1 transparent placeholder rather than blocking
+        // the send. enqueueChatVideo/_runChatVideoUpload require *some*
+        // thumbnail bytes for the upload payload.
+        thumbnailBytes = Uint8List.fromList([
+          0x89,
+          0x50,
+          0x4E,
+          0x47,
+          0x0D,
+          0x0A,
+          0x1A,
+          0x0A,
+          0x00,
+          0x00,
+          0x00,
+          0x0D,
+          0x49,
+          0x48,
+          0x44,
+          0x52,
+          0x00,
+          0x00,
+          0x00,
+          0x01,
+          0x00,
+          0x00,
+          0x00,
+          0x01,
+          0x08,
+          0x06,
+          0x00,
+          0x00,
+          0x00,
+          0x1F,
+          0x15,
+          0xC4,
+          0x89,
+          0x00,
+          0x00,
+          0x00,
+          0x0A,
+          0x49,
+          0x44,
+          0x41,
+          0x54,
+          0x78,
+          0x9C,
+          0x63,
+          0x00,
+          0x01,
+          0x00,
+          0x00,
+          0x05,
+          0x00,
+          0x01,
+          0x0D,
+          0x0A,
+          0x2D,
+          0xB4,
+          0x00,
+          0x00,
+          0x00,
+          0x00,
+          0x49,
+          0x45,
+          0x4E,
+          0x44,
+          0xAE,
+          0x42,
+          0x60,
+          0x82,
+        ]);
+      }
+    } else {
+      final String? thumbnailPath = await VideoThumbnail.thumbnailFile(
+        video: video.path,
+        thumbnailPath: (await getTemporaryDirectory()).path,
+        imageFormat: ImageFormat.JPEG,
+        quality: 75,
+        maxHeight: 200,
+        maxWidth: 200,
+      );
+
+      if (thumbnailPath == null) {
+        _flashError('Failed to generate thumbnail');
+        setState(() => _isUploadingMedia = false);
+        return;
+      }
+
+      thumbnailBytes = await File(thumbnailPath).readAsBytes();
+      thumbnailName = thumbnailPath.split('/').last;
+    }
+
+    final tempId =
+        'temp_${DateTime.now().millisecondsSinceEpoch}_${widget.userId}';
+
+    // ✅ Show optimistic message immediately
+    final optimisticMessage = ChatMessage.pending(
+      tempId: tempId,
+      userId: widget.userId,
+      username: widget.username,
+      text: caption,
+      isVideo: true,
+      videoUrl: 'uploading...',
+      replyTo: _replyingTo,
+    );
+
+    setState(() {
+      _insertMessageSorted(optimisticMessage);
+    });
+    _saveMessagesToAppCache();
+    _cancelReply();
+    _scrollToBottom();
+
+    // ✅ Enqueue background upload
+    final uploadId = UploadQueueService().enqueueChatVideo(
+      userId: widget.userId,
+      userName: widget.username,
+      videoBytes: videoBytes,
+      videoName: video.name,
+      thumbnailBytes: thumbnailBytes,
+      thumbnailName: thumbnailName,
+      caption: caption.isNotEmpty ? caption : null,
+      channelId: widget.channelId,
+      fixtureId: widget.fixtureId,
+      tempId: tempId,
+      authToken: widget.authToken,
+      onSuccess: (videoUrl, thumbnailUrl) {
+        // ✅ Upload complete - send the message via WebSocket
+        _sendMediaMessageWithUrl(
+          videoUrl: videoUrl,
+          thumbnailUrl: thumbnailUrl,
+          isImage: false,
+          isVideo: true,
+          caption: caption,
+          tempId: tempId,
+        );
+      },
+    );
+
+    _currentUploadId = uploadId;
+    setState(() => _isUploadingMedia = false);
+  } catch (e) {
+    _flashError('Failed to upload video: $e');
+    setState(() => _isUploadingMedia = false);
+  }
+}
   Future<void> _pickAndSendImage() async {
     if (_isUploadingMedia) return;
 
@@ -2118,11 +2303,17 @@ static const Duration _commentaryFetchCooldown = Duration(seconds: 20);
     _cancelReply();
     _scrollToBottom();
 
-    // ✅ Enqueue background upload - this uploads the file, then calls onSuccess
+    // Read bytes from the XFile — works on both web (blob URL) and
+    // mobile (real file path), unlike File(image.path) which throws
+    // on web since dart:io has no filesystem there.
+    final imageBytes = await image.readAsBytes();
+
+    // ✅ Enqueue background upload - this uploads the bytes, then calls onSuccess
     final uploadId = UploadQueueService().enqueueChatImage(
       userId: widget.userId,
       userName: widget.username,
-      imageFile: File(image.path),
+      imageBytes: imageBytes,
+      imageName: image.name,
       caption: caption.isNotEmpty ? caption : null,
       channelId: widget.channelId,
       fixtureId: widget.fixtureId,
@@ -2142,90 +2333,6 @@ static const Duration _commentaryFetchCooldown = Duration(seconds: 20);
 
     _currentUploadId = uploadId;
     setState(() => _isUploadingMedia = false);
-  }
-
-  Future<void> _pickAndSendVideo() async {
-    if (_isUploadingMedia) return;
-
-    final XFile? video = await _picker.pickVideo(source: ImageSource.gallery);
-    if (video == null) return;
-
-    final caption = await _showCaptionDialog(
-      hintText: 'Add a caption to your video...',
-      isImage: false,
-    );
-
-    if (caption == null) return;
-
-    setState(() => _isUploadingMedia = true);
-
-    try {
-      final String? thumbnailPath = await VideoThumbnail.thumbnailFile(
-        video: video.path,
-        thumbnailPath: (await getTemporaryDirectory()).path,
-        imageFormat: ImageFormat.JPEG,
-        quality: 75,
-        maxHeight: 200,
-        maxWidth: 200,
-      );
-
-      if (thumbnailPath == null) {
-        _flashError('Failed to generate thumbnail');
-        setState(() => _isUploadingMedia = false);
-        return;
-      }
-
-      final tempId =
-          'temp_${DateTime.now().millisecondsSinceEpoch}_${widget.userId}';
-
-      // ✅ Show optimistic message immediately
-      final optimisticMessage = ChatMessage.pending(
-        tempId: tempId,
-        userId: widget.userId,
-        username: widget.username,
-        text: caption,
-        isVideo: true,
-        videoUrl: 'uploading...',
-        replyTo: _replyingTo,
-      );
-
-      setState(() {
-        _insertMessageSorted(optimisticMessage);
-      });
-      _saveMessagesToAppCache();
-      _cancelReply();
-      _scrollToBottom();
-
-      // ✅ Enqueue background upload
-      final uploadId = UploadQueueService().enqueueChatVideo(
-        userId: widget.userId,
-        userName: widget.username,
-        videoFile: File(video.path),
-        thumbnailFile: File(thumbnailPath),
-        caption: caption.isNotEmpty ? caption : null,
-        channelId: widget.channelId,
-        fixtureId: widget.fixtureId,
-        tempId: tempId,
-        authToken: widget.authToken,
-        onSuccess: (videoUrl, thumbnailUrl) {
-          // ✅ Upload complete - send the message via WebSocket
-          _sendMediaMessageWithUrl(
-            videoUrl: videoUrl,
-            thumbnailUrl: thumbnailUrl,
-            isImage: false,
-            isVideo: true,
-            caption: caption,
-            tempId: tempId,
-          );
-        },
-      );
-
-      _currentUploadId = uploadId;
-      setState(() => _isUploadingMedia = false);
-    } catch (e) {
-      _flashError('Failed to upload video: $e');
-      setState(() => _isUploadingMedia = false);
-    }
   }
 
 // ============================================================================

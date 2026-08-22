@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import 'package:path_provider/path_provider.dart';
 import '../../services/api_services.dart';
@@ -44,13 +46,17 @@ class _AddPostModalContent extends StatefulWidget {
 
 class __AddPostModalContentState extends State<_AddPostModalContent> {
   // ==========================================================================
-  // STATE
+  // STATE — bytes-based, works on web + mobile
   // ==========================================================================
-  File? _selectedImage;
-  File? _selectedVideo;
-  File? _videoThumbnail;
-  String? _imagePreview;
-  String? _videoPreview;
+  Uint8List? _selectedImageBytes;
+  String? _selectedImageName;
+
+  Uint8List? _selectedVideoBytes;
+  String? _selectedVideoName;
+
+  Uint8List? _videoThumbnailBytes;
+  String? _videoThumbnailName;
+
   bool _isPosting = false;
   final TextEditingController _captionController = TextEditingController();
   String _message = "";
@@ -69,22 +75,23 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
         imageQuality: 85,
       );
 
-      if (image != null) {
-        final File imageFile = File(image.path);
-        final bool isValid = await _validateFileSize(imageFile, 10);
-        if (!isValid) return;
+      if (image == null) return;
 
-        setState(() {
-          _selectedImage = imageFile;
-          _imagePreview = image.path;
-          _isImageSelected = true;
-          _isVideoSelected = false;
-          _selectedVideo = null;
-          _videoPreview = null;
-          _videoThumbnail = null;
-          _message = "";
-        });
-      }
+      final bytes = await image.readAsBytes();
+      final bool isValid = _validateByteSize(bytes, 10);
+      if (!isValid) return;
+
+      setState(() {
+        _selectedImageBytes = bytes;
+        _selectedImageName = image.name;
+        _isImageSelected = true;
+        _isVideoSelected = false;
+        _selectedVideoBytes = null;
+        _selectedVideoName = null;
+        _videoThumbnailBytes = null;
+        _videoThumbnailName = null;
+        _message = "";
+      });
     } catch (e) {
       setState(() => _message = "Error picking image");
     }
@@ -95,45 +102,61 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
   // ==========================================================================
   Future<void> _pickVideo() async {
     try {
-      final XFile? video = await _picker.pickVideo(
-        source: ImageSource.gallery,
-      );
+      final XFile? video = await _picker.pickVideo(source: ImageSource.gallery);
+      if (video == null) return;
 
-      if (video != null) {
-        final File videoFile = File(video.path);
-        final bool isValid = await _validateFileSize(videoFile, 50);
-        if (!isValid) return;
+      final bytes = await video.readAsBytes();
+      final bool isValid = _validateByteSize(bytes, 50);
+      if (!isValid) return;
 
-        // Generate thumbnail
-        final String? thumbnailPath = await VideoThumbnail.thumbnailFile(
-          video: video.path,
-          thumbnailPath: (await getTemporaryDirectory()).path,
-          imageFormat: ImageFormat.JPEG,
-          quality: 75,
-        );
+      Uint8List? thumbBytes;
+      String? thumbName;
 
-        setState(() {
-          _selectedVideo = videoFile;
-          _videoPreview = video.path;
-          _videoThumbnail = thumbnailPath != null ? File(thumbnailPath) : null;
-          _isVideoSelected = true;
-          _isImageSelected = false;
-          _selectedImage = null;
-          _imagePreview = null;
-          _message = "";
-        });
+      if (kIsWeb) {
+        // video_thumbnail has no web implementation — skip auto-thumbnail
+        // on web. Caller falls back to a generic play-icon preview.
+        thumbBytes = null;
+        thumbName = null;
+      } else {
+        try {
+          final tempDir = await getTemporaryDirectory();
+          final String? thumbnailPath = await VideoThumbnail.thumbnailFile(
+            video: video.path,
+            thumbnailPath: tempDir.path,
+            imageFormat: ImageFormat.JPEG,
+            quality: 75,
+          );
+          if (thumbnailPath != null) {
+            final thumbFile = File(thumbnailPath);
+            thumbBytes = await thumbFile.readAsBytes();
+            thumbName = thumbnailPath.split('/').last;
+          }
+        } catch (e) {
+          debugPrint('⚠️ Thumbnail generation failed: $e');
+        }
       }
+
+      setState(() {
+        _selectedVideoBytes = bytes;
+        _selectedVideoName = video.name;
+        _videoThumbnailBytes = thumbBytes;
+        _videoThumbnailName = thumbName;
+        _isVideoSelected = true;
+        _isImageSelected = false;
+        _selectedImageBytes = null;
+        _selectedImageName = null;
+        _message = "";
+      });
     } catch (e) {
       setState(() => _message = "Error picking video");
     }
   }
 
   // ==========================================================================
-  // VALIDATE FILE SIZE
+  // VALIDATE FILE SIZE (bytes-based, no dart:io dependency)
   // ==========================================================================
-  Future<bool> _validateFileSize(File file, int maxSizeMB) async {
-    final size = await file.length();
-    final sizeInMB = size / (1024 * 1024);
+  bool _validateByteSize(Uint8List bytes, int maxSizeMB) {
+    final sizeInMB = bytes.lengthInBytes / (1024 * 1024);
     if (sizeInMB > maxSizeMB) {
       setState(() => _message = "File too large (max ${maxSizeMB}MB)");
       return false;
@@ -142,7 +165,7 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
   }
 
   // ==========================================================================
-  // SEND NOTIFICATIONS
+  // SEND NOTIFICATIONS (unchanged — no File dependency here)
   // ==========================================================================
   Future<void> _sendNewPostNotification({
     required String postId,
@@ -154,7 +177,6 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
   }) async {
     try {
       final followers = await ApiService.getUserFollowers(userId);
-
       if (followers.isEmpty) {
         debugPrint('📭 No followers to notify about new post');
         return;
@@ -162,8 +184,7 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
 
       String postPreview;
       if (caption.isNotEmpty) {
-        postPreview =
-            caption.length > 60 ? '${caption.substring(0, 60)}...' : caption;
+        postPreview = caption.length > 60 ? '${caption.substring(0, 60)}...' : caption;
       } else if (hasVideo) {
         postPreview = '🎥 Shared a video';
       } else if (hasImage) {
@@ -187,9 +208,7 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
 
       int successCount = 0;
       for (var follower in followers) {
-        final followerId =
-            follower['user_id']?.toString() ?? follower['id']?.toString();
-
+        final followerId = follower['user_id']?.toString() ?? follower['id']?.toString();
         if (followerId != null && followerId != userId) {
           try {
             final success = await NotificationService.sendNotification(
@@ -216,17 +235,12 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
         }
       }
 
-      debugPrint(
-        '✅ Sent new post notifications to $successCount/${followers.length} followers',
-      );
+      debugPrint('✅ Sent new post notifications to $successCount/${followers.length} followers');
     } catch (e) {
       debugPrint('❌ Error sending new post notifications: $e');
     }
   }
 
-  // ==========================================================================
-  // SUBMIT POST
-  // ==========================================================================
   // ==========================================================================
   // SUBMIT POST — enqueues upload in background, closes modal immediately
   // ==========================================================================
@@ -238,21 +252,24 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
 
     final caption = _captionController.text.trim();
 
-    if (caption.isEmpty && _selectedImage == null && _selectedVideo == null) {
+    if (caption.isEmpty && _selectedImageBytes == null && _selectedVideoBytes == null) {
       setState(() => _message = "Please add a caption, image, or video");
       return;
     }
 
-    final bool hasImage = _selectedImage != null;
-    final bool hasVideo = _selectedVideo != null;
+    final bool hasImage = _selectedImageBytes != null;
+    final bool hasVideo = _selectedVideoBytes != null;
 
     UploadQueueService().enqueuePost(
       userId: widget.userId!,
       userName: widget.username ?? 'User',
       caption: caption.isNotEmpty ? caption : null,
-      image: _selectedImage,
-      video: _selectedVideo,
-      videoThumbnail: _videoThumbnail,
+      imageBytes: _selectedImageBytes,
+      imageName: _selectedImageName,
+      videoBytes: _selectedVideoBytes,
+      videoName: _selectedVideoName,
+      videoThumbnailBytes: _videoThumbnailBytes,
+      videoThumbnailName: _videoThumbnailName,
     );
 
     if (widget.onPostCreated != null) {
@@ -283,11 +300,12 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
   void _clearForm() {
     _captionController.clear();
     setState(() {
-      _selectedImage = null;
-      _selectedVideo = null;
-      _videoThumbnail = null;
-      _imagePreview = null;
-      _videoPreview = null;
+      _selectedImageBytes = null;
+      _selectedImageName = null;
+      _selectedVideoBytes = null;
+      _selectedVideoName = null;
+      _videoThumbnailBytes = null;
+      _videoThumbnailName = null;
       _isImageSelected = false;
       _isVideoSelected = false;
       _message = "";
@@ -299,14 +317,14 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
   // ==========================================================================
   bool get _isPostButtonEnabled {
     final bool hasCaption = _captionController.text.trim().isNotEmpty;
-    final bool hasMedia = _selectedImage != null || _selectedVideo != null;
+    final bool hasMedia = _selectedImageBytes != null || _selectedVideoBytes != null;
     return !_isPosting && (hasCaption || hasMedia);
   }
 
   String _getPostButtonText() {
     final bool hasCaption = _captionController.text.trim().isNotEmpty;
-    final bool hasVideo = _selectedVideo != null;
-    final bool hasImage = _selectedImage != null;
+    final bool hasVideo = _selectedVideoBytes != null;
+    final bool hasImage = _selectedImageBytes != null;
 
     if (hasCaption && hasVideo) return "Post Video";
     if (hasCaption && hasImage) return "Post Image";
@@ -316,8 +334,8 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
   }
 
   IconData _getPostButtonIcon() {
-    final bool hasVideo = _selectedVideo != null;
-    final bool hasImage = _selectedImage != null;
+    final bool hasVideo = _selectedVideoBytes != null;
+    final bool hasImage = _selectedImageBytes != null;
 
     if (hasVideo) return Icons.videocam_rounded;
     if (hasImage) return Icons.image_rounded;
@@ -326,8 +344,8 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
 
   String _getPostTypeText() {
     final bool hasCaption = _captionController.text.trim().isNotEmpty;
-    final bool hasVideo = _selectedVideo != null;
-    final bool hasImage = _selectedImage != null;
+    final bool hasVideo = _selectedVideoBytes != null;
+    final bool hasImage = _selectedImageBytes != null;
 
     if (hasCaption && hasVideo) return "📹 Video with caption";
     if (hasCaption && hasImage) return "🖼️ Image with caption";
@@ -338,12 +356,12 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
   }
 
   String _getFileSize() {
-    if (_selectedVideo != null) {
-      final size = _selectedVideo!.lengthSync();
+    if (_selectedVideoBytes != null) {
+      final size = _selectedVideoBytes!.lengthInBytes;
       return '${(size / (1024 * 1024)).toStringAsFixed(1)} MB';
     }
-    if (_selectedImage != null) {
-      final size = _selectedImage!.lengthSync();
+    if (_selectedImageBytes != null) {
+      final size = _selectedImageBytes!.lengthInBytes;
       return '${(size / 1024).toStringAsFixed(0)} KB';
     }
     return '';
@@ -353,7 +371,7 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
   // BUILD MEDIA PREVIEW
   // ==========================================================================
   Widget _buildMediaPreview() {
-    if (_selectedVideo != null && _videoPreview != null) {
+    if (_selectedVideoBytes != null) {
       return Container(
         height: 160,
         decoration: FanDecorations.card(isActive: true),
@@ -364,10 +382,9 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  // Video thumbnail
-                  if (_videoThumbnail != null)
-                    Image.file(
-                      _videoThumbnail!,
+                  if (_videoThumbnailBytes != null)
+                    Image.memory(
+                      _videoThumbnailBytes!,
                       fit: BoxFit.cover,
                       width: double.infinity,
                       height: double.infinity,
@@ -375,15 +392,10 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
                   else
                     Container(
                       color: Colors.black,
-                      child: Center(
-                        child: Icon(
-                          Icons.play_circle_filled,
-                          color: Colors.white,
-                          size: 48,
-                        ),
+                      child: const Center(
+                        child: Icon(Icons.play_circle_filled, color: Colors.white, size: 48),
                       ),
                     ),
-                  // Overlay gradient
                   Container(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
@@ -397,49 +409,28 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
                       ),
                     ),
                   ),
-                  // VIDEO LABEL - Top Left
                   Positioned(
                     top: 12,
                     left: 12,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
                         color: Colors.red,
                         borderRadius: BorderRadius.circular(8),
                         boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.3),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
+                          BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 2)),
                         ],
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(
-                            Icons.videocam,
-                            color: Colors.white,
-                            size: 14,
-                          ),
+                          const Icon(Icons.videocam, color: Colors.white, size: 14),
                           const SizedBox(width: 6),
-                          const Text(
-                            'VIDEO',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 1,
-                            ),
-                          ),
+                          const Text('VIDEO', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1)),
                         ],
                       ),
                     ),
                   ),
-                  // Play button center
                   const Positioned(
                     top: 0,
                     left: 0,
@@ -449,64 +440,39 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
                       child: SizedBox(
                         width: 56,
                         height: 56,
-                        child: Icon(
-                          Icons.play_arrow_rounded,
-                          color: Colors.white,
-                          size: 56,
-                        ),
+                        child: Icon(Icons.play_arrow_rounded, color: Colors.white, size: 56),
                       ),
                     ),
                   ),
-                  // File info - Bottom Right
                   Positioned(
                     bottom: 12,
                     right: 12,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.75),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        _getFileSize(),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.75), borderRadius: BorderRadius.circular(6)),
+                      child: Text(_getFileSize(), style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w500)),
                     ),
                   ),
                 ],
               ),
             ),
-            // Remove button
             Positioned(
               top: 12,
               right: 12,
               child: GestureDetector(
                 onTap: () => setState(() {
-                  _selectedVideo = null;
-                  _videoPreview = null;
-                  _videoThumbnail = null;
+                  _selectedVideoBytes = null;
+                  _selectedVideoName = null;
+                  _videoThumbnailBytes = null;
+                  _videoThumbnailName = null;
                   _isVideoSelected = false;
                   _message = "";
                 }),
                 child: Container(
                   width: 32,
                   height: 32,
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.7),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.close,
-                    color: Colors.white,
-                    size: 18,
-                  ),
+                  decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.7), shape: BoxShape.circle),
+                  child: const Icon(Icons.close, color: Colors.white, size: 18),
                 ),
               ),
             ),
@@ -515,7 +481,7 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
       );
     }
 
-    if (_selectedImage != null && _imagePreview != null) {
+    if (_selectedImageBytes != null) {
       return Container(
         height: 160,
         decoration: FanDecorations.card(isActive: true),
@@ -526,13 +492,12 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  Image.file(
-                    File(_imagePreview!),
+                  Image.memory(
+                    _selectedImageBytes!,
                     fit: BoxFit.cover,
                     width: double.infinity,
                     height: double.infinity,
                   ),
-                  // Overlay gradient
                   Container(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
@@ -546,97 +511,55 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
                       ),
                     ),
                   ),
-                  // IMAGE LABEL - Top Left
                   Positioned(
                     top: 12,
                     left: 12,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
                         color: Colors.blue,
                         borderRadius: BorderRadius.circular(8),
                         boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.3),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
+                          BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 2)),
                         ],
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(
-                            Icons.image,
-                            color: Colors.white,
-                            size: 14,
-                          ),
+                          const Icon(Icons.image, color: Colors.white, size: 14),
                           const SizedBox(width: 6),
-                          const Text(
-                            'IMAGE',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 1,
-                            ),
-                          ),
+                          const Text('IMAGE', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1)),
                         ],
                       ),
                     ),
                   ),
-                  // File info - Bottom Right
                   Positioned(
                     bottom: 12,
                     right: 12,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.75),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        _getFileSize(),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.75), borderRadius: BorderRadius.circular(6)),
+                      child: Text(_getFileSize(), style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w500)),
                     ),
                   ),
                 ],
               ),
             ),
-            // Remove button
             Positioned(
               top: 12,
               right: 12,
               child: GestureDetector(
                 onTap: () => setState(() {
-                  _selectedImage = null;
-                  _imagePreview = null;
+                  _selectedImageBytes = null;
+                  _selectedImageName = null;
                   _isImageSelected = false;
                   _message = "";
                 }),
                 child: Container(
                   width: 32,
                   height: 32,
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.7),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.close,
-                    color: Colors.white,
-                    size: 18,
-                  ),
+                  decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.7), shape: BoxShape.circle),
+                  child: const Icon(Icons.close, color: Colors.white, size: 18),
                 ),
               ),
             ),
@@ -648,9 +571,6 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
     return const SizedBox.shrink();
   }
 
-  // ==========================================================================
-  // BUILD
-  // ==========================================================================
   @override
   void dispose() {
     _captionController.dispose();
@@ -660,35 +580,27 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
   @override
   Widget build(BuildContext context) {
     final bool hasCaption = _captionController.text.trim().isNotEmpty;
-    final bool hasVideo = _selectedVideo != null;
-    final bool hasImage = _selectedImage != null;
+    final bool hasVideo = _selectedVideoBytes != null;
+    final bool hasImage = _selectedImageBytes != null;
     final bool hasMedia = hasVideo || hasImage;
 
     return Container(
       height: MediaQuery.of(context).size.height * 0.75,
       decoration: BoxDecoration(
         color: FanColors.surface,
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(24),
-          topRight: Radius.circular(24),
-        ),
+        borderRadius: const BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24)),
         border: Border.all(color: FanColors.border),
       ),
       child: Column(
         children: [
-          // Drag handle
           Center(
             child: Container(
               width: 40,
               height: 4,
               margin: const EdgeInsets.only(top: 12, bottom: 8),
-              decoration: BoxDecoration(
-                color: FanColors.border,
-                borderRadius: BorderRadius.circular(2),
-              ),
+              decoration: BoxDecoration(color: FanColors.border, borderRadius: BorderRadius.circular(2)),
             ),
           ),
-          // Header
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             child: Row(
@@ -696,25 +608,15 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
                 Container(
                   width: 44,
                   height: 44,
-                  decoration: BoxDecoration(
-                    color: FanColors.primary,
-                    shape: BoxShape.circle,
-                  ),
+                  decoration: BoxDecoration(color: FanColors.primary, shape: BoxShape.circle),
                   child: Center(
                     child: Container(
                       width: 40,
                       height: 40,
-                      decoration: BoxDecoration(
-                        color: FanColors.background,
-                        shape: BoxShape.circle,
-                      ),
+                      decoration: BoxDecoration(color: FanColors.background, shape: BoxShape.circle),
                       child: Center(
                         child: Icon(
-                          hasVideo
-                              ? Icons.videocam
-                              : hasImage
-                                  ? Icons.image
-                                  : Icons.add_a_photo,
+                          hasVideo ? Icons.videocam : hasImage ? Icons.image : Icons.add_a_photo,
                           color: FanColors.primary,
                           size: 20,
                         ),
@@ -727,18 +629,11 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        hasVideo ? "Create Video Post" : "Create Post",
-                        style: FanTypography.headline,
-                      ),
+                      Text(hasVideo ? "Create Video Post" : "Create Post", style: FanTypography.headline),
                       const SizedBox(height: 4),
                       Text(
-                        widget.username?.isNotEmpty == true
-                            ? "@${widget.username}"
-                            : "Share your moment",
-                        style: FanTypography.caption.copyWith(
-                          color: FanColors.textSecondary,
-                        ),
+                        widget.username?.isNotEmpty == true ? "@${widget.username}" : "Share your moment",
+                        style: FanTypography.caption.copyWith(color: FanColors.textSecondary),
                       ),
                     ],
                   ),
@@ -748,48 +643,31 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
                   child: Container(
                     width: 36,
                     height: 36,
-                    decoration: BoxDecoration(
-                      color: FanColors.surfaceSunken,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: FanColors.border),
-                    ),
-                    child: Icon(
-                      Icons.close,
-                      color: FanColors.textPrimary,
-                      size: 18,
-                    ),
+                    decoration: BoxDecoration(color: FanColors.surfaceSunken, shape: BoxShape.circle, border: Border.all(color: FanColors.border)),
+                    child: Icon(Icons.close, color: FanColors.textPrimary, size: 18),
                   ),
                 ),
               ],
             ),
           ),
-          // Content
           Expanded(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: ListView(
                 children: [
-                  // Caption field
                   Container(
                     decoration: BoxDecoration(
                       color: FanColors.surfaceSunken,
                       borderRadius: FanRadius.lgAll,
-                      border: hasCaption
-                          ? Border.all(color: FanColors.primary, width: 1.5)
-                          : null,
+                      border: hasCaption ? Border.all(color: FanColors.primary, width: 1.5) : null,
                     ),
                     child: TextField(
                       controller: _captionController,
                       maxLines: 4,
-                      style: FanTypography.body.copyWith(
-                        fontSize: 15,
-                        height: 1.4,
-                      ),
+                      style: FanTypography.body.copyWith(fontSize: 15, height: 1.4),
                       decoration: InputDecoration(
                         hintText: "What's on your mind? (Optional)",
-                        hintStyle: FanTypography.body.copyWith(
-                          color: FanColors.textTertiary,
-                        ),
+                        hintStyle: FanTypography.body.copyWith(color: FanColors.textTertiary),
                         contentPadding: const EdgeInsets.all(16),
                         border: InputBorder.none,
                         filled: true,
@@ -797,40 +675,26 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
                         suffixIcon: hasCaption
                             ? Padding(
                                 padding: const EdgeInsets.all(12),
-                                child: Icon(
-                                  Icons.text_fields,
-                                  color: FanColors.primary,
-                                  size: 20,
-                                ),
+                                child: Icon(Icons.text_fields, color: FanColors.primary, size: 20),
                               )
                             : null,
                       ),
-                      onChanged: (value) {
-                        setState(() {});
-                      },
+                      onChanged: (value) => setState(() {}),
                     ),
                   ),
                   const SizedBox(height: 16),
-                  // Media picker section
                   Container(
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     decoration: BoxDecoration(
                       color: FanColors.surfaceSunken,
                       borderRadius: FanRadius.lgAll,
                       border: hasMedia
-                          ? Border.all(
-                              color: FanColors.primaryMuted,
-                              width: 1.5,
-                            )
-                          : Border.all(
-                              color: FanColors.draw.withValues(alpha: 0.3),
-                              width: 1,
-                            ),
+                          ? Border.all(color: FanColors.primaryMuted, width: 1.5)
+                          : Border.all(color: FanColors.draw.withValues(alpha: 0.3), width: 1),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
-                        // Image picker
                         GestureDetector(
                           onTap: _pickImage,
                           child: Column(
@@ -839,61 +703,20 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
                                 width: 52,
                                 height: 52,
                                 decoration: BoxDecoration(
-                                  color: hasImage
-                                      ? FanColors.primaryDim
-                                      : FanColors.surface,
+                                  color: hasImage ? FanColors.primaryDim : FanColors.surface,
                                   shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: hasImage
-                                        ? FanColors.primary
-                                        : FanColors.border,
-                                    width: hasImage ? 2 : 1.5,
-                                  ),
-                                  boxShadow: hasImage
-                                      ? [
-                                          BoxShadow(
-                                            color: FanColors.primary
-                                                .withValues(alpha: 0.2),
-                                            blurRadius: 8,
-                                          )
-                                        ]
-                                      : null,
+                                  border: Border.all(color: hasImage ? FanColors.primary : FanColors.border, width: hasImage ? 2 : 1.5),
+                                  boxShadow: hasImage ? [BoxShadow(color: FanColors.primary.withValues(alpha: 0.2), blurRadius: 8)] : null,
                                 ),
-                                child: Icon(
-                                  Icons.photo_library,
-                                  color: hasImage
-                                      ? FanColors.primary
-                                      : FanColors.textSecondary,
-                                  size: 24,
-                                ),
+                                child: Icon(Icons.photo_library, color: hasImage ? FanColors.primary : FanColors.textSecondary, size: 24),
                               ),
                               const SizedBox(height: 4),
-                              Text(
-                                "Photo",
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: hasImage
-                                      ? FanColors.primary
-                                      : FanColors.textSecondary,
-                                  fontWeight: hasImage
-                                      ? FontWeight.w700
-                                      : FontWeight.normal,
-                                ),
-                              ),
+                              Text("Photo", style: TextStyle(fontSize: 10, color: hasImage ? FanColors.primary : FanColors.textSecondary, fontWeight: hasImage ? FontWeight.w700 : FontWeight.normal)),
                               if (hasImage)
-                                Container(
-                                  width: 6,
-                                  height: 6,
-                                  margin: const EdgeInsets.only(top: 2),
-                                  decoration: BoxDecoration(
-                                    color: FanColors.primary,
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
+                                Container(width: 6, height: 6, margin: const EdgeInsets.only(top: 2), decoration: BoxDecoration(color: FanColors.primary, shape: BoxShape.circle)),
                             ],
                           ),
                         ),
-                        // Video picker
                         GestureDetector(
                           onTap: _pickVideo,
                           child: Column(
@@ -902,70 +725,30 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
                                 width: 52,
                                 height: 52,
                                 decoration: BoxDecoration(
-                                  color: hasVideo
-                                      ? FanColors.primaryDim
-                                      : FanColors.surface,
+                                  color: hasVideo ? FanColors.primaryDim : FanColors.surface,
                                   shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: hasVideo
-                                        ? FanColors.primary
-                                        : FanColors.border,
-                                    width: hasVideo ? 2 : 1.5,
-                                  ),
-                                  boxShadow: hasVideo
-                                      ? [
-                                          BoxShadow(
-                                            color: FanColors.primary
-                                                .withValues(alpha: 0.2),
-                                            blurRadius: 8,
-                                          )
-                                        ]
-                                      : null,
+                                  border: Border.all(color: hasVideo ? FanColors.primary : FanColors.border, width: hasVideo ? 2 : 1.5),
+                                  boxShadow: hasVideo ? [BoxShadow(color: FanColors.primary.withValues(alpha: 0.2), blurRadius: 8)] : null,
                                 ),
-                                child: Icon(
-                                  Icons.videocam,
-                                  color: hasVideo
-                                      ? FanColors.primary
-                                      : FanColors.textSecondary,
-                                  size: 24,
-                                ),
+                                child: Icon(Icons.videocam, color: hasVideo ? FanColors.primary : FanColors.textSecondary, size: 24),
                               ),
                               const SizedBox(height: 4),
-                              Text(
-                                "Video",
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: hasVideo
-                                      ? FanColors.primary
-                                      : FanColors.textSecondary,
-                                  fontWeight: hasVideo
-                                      ? FontWeight.w700
-                                      : FontWeight.normal,
-                                ),
-                              ),
+                              Text("Video", style: TextStyle(fontSize: 10, color: hasVideo ? FanColors.primary : FanColors.textSecondary, fontWeight: hasVideo ? FontWeight.w700 : FontWeight.normal)),
                               if (hasVideo)
-                                Container(
-                                  width: 6,
-                                  height: 6,
-                                  margin: const EdgeInsets.only(top: 2),
-                                  decoration: BoxDecoration(
-                                    color: FanColors.primary,
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
+                                Container(width: 6, height: 6, margin: const EdgeInsets.only(top: 2), decoration: BoxDecoration(color: FanColors.primary, shape: BoxShape.circle)),
                             ],
                           ),
                         ),
-                        // Clear media
                         if (hasMedia)
                           GestureDetector(
                             onTap: () {
                               setState(() {
-                                _selectedImage = null;
-                                _imagePreview = null;
-                                _selectedVideo = null;
-                                _videoPreview = null;
-                                _videoThumbnail = null;
+                                _selectedImageBytes = null;
+                                _selectedImageName = null;
+                                _selectedVideoBytes = null;
+                                _selectedVideoName = null;
+                                _videoThumbnailBytes = null;
+                                _videoThumbnailName = null;
                                 _isImageSelected = false;
                                 _isVideoSelected = false;
                                 _message = "";
@@ -976,29 +759,11 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
                                 Container(
                                   width: 52,
                                   height: 52,
-                                  decoration: BoxDecoration(
-                                    color: FanColors.awayDim,
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: FanColors.away,
-                                      width: 1.5,
-                                    ),
-                                  ),
-                                  child: Icon(
-                                    Icons.clear,
-                                    color: FanColors.away,
-                                    size: 24,
-                                  ),
+                                  decoration: BoxDecoration(color: FanColors.awayDim, shape: BoxShape.circle, border: Border.all(color: FanColors.away, width: 1.5)),
+                                  child: Icon(Icons.clear, color: FanColors.away, size: 24),
                                 ),
                                 const SizedBox(height: 4),
-                                Text(
-                                  "Clear",
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    color: FanColors.away,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
+                                Text("Clear", style: TextStyle(fontSize: 10, color: FanColors.away, fontWeight: FontWeight.w600)),
                               ],
                             ),
                           ),
@@ -1006,81 +771,39 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  // Media preview
                   if (hasMedia) ...[
                     _buildMediaPreview(),
                     const SizedBox(height: 8),
                   ],
-                  // Post type indicator
                   if (hasCaption || hasMedia) ...[
                     Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 10,
-                      ),
-                      decoration: BoxDecoration(
-                        color: FanColors.primaryDim,
-                        borderRadius: FanRadius.pillAll,
-                        border: Border.all(
-                          color: FanColors.primaryMuted,
-                          width: 1,
-                        ),
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(color: FanColors.primaryDim, borderRadius: FanRadius.pillAll, border: Border.all(color: FanColors.primaryMuted, width: 1)),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(
-                            hasVideo
-                                ? Icons.videocam
-                                : hasImage
-                                    ? Icons.image
-                                    : Icons.text_fields,
-                            color: FanColors.primary,
-                            size: 18,
-                          ),
+                          Icon(hasVideo ? Icons.videocam : hasImage ? Icons.image : Icons.text_fields, color: FanColors.primary, size: 18),
                           const SizedBox(width: 8),
-                          Text(
-                            _getPostTypeText(),
-                            style: FanTypography.body.copyWith(
-                              color: FanColors.primary,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 13,
-                            ),
-                          ),
+                          Text(_getPostTypeText(), style: FanTypography.body.copyWith(color: FanColors.primary, fontWeight: FontWeight.w700, fontSize: 13)),
                         ],
                       ),
                     ),
                     const SizedBox(height: 8),
                   ],
-                  // Message status
                   if (_message.isNotEmpty) ...[
                     const SizedBox(height: 12),
                     Container(
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: _message.contains("successfully") ||
-                                _message.contains("created")
-                            ? FanColors.primaryDim
-                            : FanColors.awayDim,
+                        color: _message.contains("successfully") || _message.contains("created") ? FanColors.primaryDim : FanColors.awayDim,
                         borderRadius: FanRadius.lgAll,
-                        border: Border.all(
-                          color: _message.contains("successfully") ||
-                                  _message.contains("created")
-                              ? FanColors.primaryMuted
-                              : FanColors.away.withValues(alpha: 0.3),
-                        ),
+                        border: Border.all(color: _message.contains("successfully") || _message.contains("created") ? FanColors.primaryMuted : FanColors.away.withValues(alpha: 0.3)),
                       ),
                       child: Row(
                         children: [
                           Icon(
-                            _message.contains("successfully") ||
-                                    _message.contains("created")
-                                ? Icons.check_circle_outline
-                                : Icons.error_outline,
-                            color: _message.contains("successfully") ||
-                                    _message.contains("created")
-                                ? FanColors.primary
-                                : FanColors.away,
+                            _message.contains("successfully") || _message.contains("created") ? Icons.check_circle_outline : Icons.error_outline,
+                            color: _message.contains("successfully") || _message.contains("created") ? FanColors.primary : FanColors.away,
                             size: 22,
                           ),
                           const SizedBox(width: 12),
@@ -1088,10 +811,7 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
                             child: Text(
                               _message,
                               style: FanTypography.body.copyWith(
-                                color: _message.contains("successfully") ||
-                                        _message.contains("created")
-                                    ? FanColors.primary
-                                    : FanColors.away,
+                                color: _message.contains("successfully") || _message.contains("created") ? FanColors.primary : FanColors.away,
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
@@ -1101,43 +821,26 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
                     ),
                   ],
                   const SizedBox(height: 12),
-                  // Action buttons
                   Row(
                     children: [
-                      // Clear button
                       Expanded(
                         child: GestureDetector(
                           onTap: _clearForm,
                           child: Container(
                             height: 48,
-                            decoration: BoxDecoration(
-                              color: FanColors.surfaceSunken,
-                              borderRadius: FanRadius.pillAll,
-                              border: Border.all(color: FanColors.border),
-                            ),
+                            decoration: BoxDecoration(color: FanColors.surfaceSunken, borderRadius: FanRadius.pillAll, border: Border.all(color: FanColors.border)),
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Icon(
-                                  Icons.refresh,
-                                  color: FanColors.textSecondary,
-                                  size: 18,
-                                ),
+                                Icon(Icons.refresh, color: FanColors.textSecondary, size: 18),
                                 const SizedBox(width: 8),
-                                Text(
-                                  "Clear",
-                                  style: FanTypography.body.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                    color: FanColors.textSecondary,
-                                  ),
-                                ),
+                                Text("Clear", style: FanTypography.body.copyWith(fontWeight: FontWeight.w600, color: FanColors.textSecondary)),
                               ],
                             ),
                           ),
                         ),
                       ),
                       const SizedBox(width: 16),
-                      // Post button
                       Expanded(
                         flex: 2,
                         child: GestureDetector(
@@ -1146,11 +849,7 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
                             height: 48,
                             decoration: _isPostButtonEnabled
                                 ? FanDecorations.primaryButton
-                                : BoxDecoration(
-                                    color: FanColors.surfaceSunken,
-                                    borderRadius: FanRadius.pillAll,
-                                    border: Border.all(color: FanColors.border),
-                                  ),
+                                : BoxDecoration(color: FanColors.surfaceSunken, borderRadius: FanRadius.pillAll, border: Border.all(color: FanColors.border)),
                             child: _isPosting
                                 ? Center(
                                     child: SizedBox(
@@ -1158,29 +857,19 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
                                       height: 24,
                                       child: CircularProgressIndicator(
                                         strokeWidth: 2,
-                                        color: _isPostButtonEnabled
-                                            ? FanColors.textInverse
-                                            : FanColors.textTertiary,
+                                        color: _isPostButtonEnabled ? FanColors.textInverse : FanColors.textTertiary,
                                       ),
                                     ),
                                   )
                                 : Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      Icon(
-                                        _getPostButtonIcon(),
-                                        color: _isPostButtonEnabled
-                                            ? FanColors.textInverse
-                                            : FanColors.textTertiary,
-                                        size: 18,
-                                      ),
+                                      Icon(_getPostButtonIcon(), color: _isPostButtonEnabled ? FanColors.textInverse : FanColors.textTertiary, size: 18),
                                       const SizedBox(width: 10),
                                       Text(
                                         _getPostButtonText(),
                                         style: FanTypography.button.copyWith(
-                                          color: _isPostButtonEnabled
-                                              ? FanColors.textInverse
-                                              : FanColors.textTertiary,
+                                          color: _isPostButtonEnabled ? FanColors.textInverse : FanColors.textTertiary,
                                           letterSpacing: 0.5,
                                         ),
                                       ),

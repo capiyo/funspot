@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:web_socket_channel/web_socket_channel.dart';
-import 'package:web_socket_channel/io.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 
@@ -26,6 +25,18 @@ import '../models/chat_message.dart';
 // time, on the same connection. pinRoom/unpinRoom are kept as thin
 // deprecated no-ops so existing call sites don't break, but they no longer
 // do anything meaningful.
+//
+// ⚠️ PLATFORM FIX: this file previously connected via
+// `IOWebSocketChannel.connect(...)` (package:web_socket_channel/io.dart).
+// IOWebSocketChannel wraps dart:io's WebSocket, which only exists on the
+// Dart VM / native targets (Android, iOS, desktop). It has no browser
+// implementation, so on Flutter web the connection silently never
+// completes. The fix is to use the platform-agnostic
+// `WebSocketChannel.connect(uri)` factory from the base
+// web_socket_channel.dart import — it resolves to IOWebSocketChannel on
+// native and HtmlWebSocketChannel on web via conditional imports, so the
+// exact same call site now works on both. The io.dart import is no longer
+// needed and has been removed.
 // ============================================================================
 
 class WebSocketService {
@@ -73,12 +84,14 @@ class WebSocketService {
   // Multi-room join makes stealing impossible, so pinning has nothing to do.
   // ==========================================================================
 
-  @Deprecated('No longer needed — rooms are additive now. Safe to remove calls.')
+  @Deprecated(
+      'No longer needed — rooms are additive now. Safe to remove calls.')
   void pinRoom(String roomId) {
     debugPrint('📌 pinRoom($roomId) is a no-op now — rooms are additive.');
   }
 
-  @Deprecated('No longer needed — rooms are additive now. Safe to remove calls.')
+  @Deprecated(
+      'No longer needed — rooms are additive now. Safe to remove calls.')
   void unpinRoom(String roomId) {
     debugPrint('📌 unpinRoom($roomId) is a no-op now — rooms are additive.');
   }
@@ -210,7 +223,18 @@ class WebSocketService {
     });
 
     try {
-      _channel = IOWebSocketChannel.connect(Uri.parse(wsUrl));
+      // ✅ Platform-agnostic factory — resolves to IOWebSocketChannel on
+      // native (Android/iOS/desktop) and HtmlWebSocketChannel on web,
+      // via web_socket_channel's own conditional imports. This is the
+      // one-line fix that makes the exact same call work on both targets.
+      _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
+
+      // On web the socket isn't guaranteed open the instant connect()
+      // returns. Awaiting `ready` surfaces connection errors immediately
+      // (via the catch below) instead of them appearing only later as a
+      // generic stream error, and it's a no-op-fast on native once the
+      // underlying IOWebSocketChannel is already connected.
+      await _channel!.ready;
 
       _channel!.stream.listen(
         _handleMessage,
@@ -541,7 +565,6 @@ class WebSocketService {
   // ==========================================================================
   // CHAT METHODS
   // ==========================================================================
-  // Add this method to WebSocketService (services/web_soecket.dart)
 
   /// Sends a chat message, reconnecting once and waiting briefly if the
   /// socket is currently disconnected, instead of failing instantly.

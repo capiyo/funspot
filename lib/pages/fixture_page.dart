@@ -11957,8 +11957,10 @@ void _joinFixtureRooms() {
   // ============================================================================
 // WEB SOCKET LISTENER SETUP - COMPLETE
 // ============================================================================
-
+bool _wsListenersSetup = false;
   void _setupWebSocketListeners() {
+     if (_wsListenersSetup) return;
+    _wsListenersSetup = true;
     final ws = WebSocketService();
 
     // ============================================================
@@ -13772,57 +13774,65 @@ void _joinFixtureRooms() {
 
   // ========== DISPOSE ==========
   @override
-  void dispose() {
-    // ✅ Cancel AppCache subscription
-    FanTheme.controller.removeListener(_onThemeChanged);
-    _appCacheSubscription?.cancel();
-    _appCacheSubscription = null;
-    _appCacheVotesSubscription?.cancel(); // ✅ Cancel votes subscription
-    _appCacheVotesSubscription = null;
-    _threeMinRefreshTimer?.cancel();
-    _backgroundTeardownTimer?.cancel();
+void dispose() {
+  // ✅ Cancel AppCache subscription
+  FanTheme.controller.removeListener(_onThemeChanged);
+  _appCacheSubscription?.cancel();
+  _appCacheSubscription = null;
+  _appCacheVotesSubscription?.cancel();
+  _appCacheVotesSubscription = null;
+  _threeMinRefreshTimer?.cancel();
+  _backgroundTeardownTimer?.cancel();
 
-    // Disconnect WebSocket
-    final ws = WebSocketService();
-    ws.disconnect();
-    _wsConnected = false;
-
-    // Cancel FCM subscription
-    _fcmBadgeSubscription?.cancel();
-    _fcmBadgeSubscription = null;
-
-    // Remove auth listener
-    _authService.removeListener(_onAuthStateChanged);
-
-    // Remove widget binding observer
-    WidgetsBinding.instance.removeObserver(this);
-
-    // Mark as disposed
-    _isDisposed = true;
-
-    // Cancel all timers
-    _searchController.dispose();
-    _syncTimer?.cancel();
-    _cachePollingTimer?.cancel();
-    _refreshDebounceTimer?.cancel();
-
-    // Dispose all comment controllers
-    for (var controller in _commentControllers.values) {
-      controller.dispose();
+  // ✅ Leave only the fixture rooms this page joined — never disconnect the
+  // shared WebSocketService, since ChatScreen (including a wide-screen
+  // Dialog instance) or HistoryPage may still be using the same connection.
+  final ws = WebSocketService();
+  for (var fixture in _fixtures) {
+    if (fixture.isLive == true) {
+      final channelId = _resolveChannelIdFor(fixture.matchId);
+      if (channelId != null) {
+        ws.leaveChannelFixtureRoom(channelId, fixtureId: fixture.matchId);
+      }
     }
+  }
+  _wsConnected = false;
 
-    // Dispose all badge animation controllers
-    for (var controller in _badgeTimers.values) {
-      controller.dispose();
-    }
-    _badgeTimers.clear();
-    _badgeScaleAnimations.clear();
-    _commentaryPollTimer?.cancel();
-    _commentPollTimer?.cancel(); // ✅ ADD THIS
+  // Cancel FCM subscription
+  _fcmBadgeSubscription?.cancel();
+  _fcmBadgeSubscription = null;
 
-    super.dispose();
+  // Remove auth listener
+  _authService.removeListener(_onAuthStateChanged);
+
+  // Remove widget binding observer
+  WidgetsBinding.instance.removeObserver(this);
+
+  // Mark as disposed
+  _isDisposed = true;
+
+  // Cancel all timers
+  _searchController.dispose();
+  _syncTimer?.cancel();
+  _cachePollingTimer?.cancel();
+  _refreshDebounceTimer?.cancel();
+
+  // Dispose all comment controllers
+  for (var controller in _commentControllers.values) {
+    controller.dispose();
   }
 
+  // Dispose all badge animation controllers
+  for (var controller in _badgeTimers.values) {
+    controller.dispose();
+  }
+  _badgeTimers.clear();
+  _badgeScaleAnimations.clear();
+  _commentaryPollTimer?.cancel();
+  _commentPollTimer?.cancel();
+
+  super.dispose();
+}
   void _handleBadgeUpdate(Map<String, dynamic> event) {
     debugPrint('🔔 FixturesPage received badge event: $event');
 
@@ -15174,6 +15184,7 @@ void _loadDeferredData() {
       }
     });
   }
+  
 
   Future<void> _refreshFixtures() async {
     debugPrint('🔄 Refreshing fixtures and comments...');

@@ -1,9 +1,11 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:background_downloader/background_downloader.dart';
+import 'package:path_provider/path_provider.dart';
 
 class ApiService {
   static final Dio _dio = Dio(
@@ -32,16 +34,45 @@ class ApiService {
   }
 
   // ==========================================================================
-  // POST METHODS (Images & Videos)
+  // HELPERS
+  // ==========================================================================
+
+  static String _extensionFromName(String name, {String fallback = 'dat'}) {
+    final parts = name.split('.');
+    if (parts.length < 2) return fallback;
+    return parts.last.toLowerCase();
+  }
+
+  static String _getPostType(String? caption, bool hasImage, bool hasVideo) {
+    final hasCaption = caption != null && caption.isNotEmpty;
+    if (hasCaption && hasVideo) return 'TEXT_AND_VIDEO';
+    if (hasCaption && hasImage) return 'TEXT_AND_IMAGE';
+    if (hasVideo) return 'VIDEO_ONLY';
+    if (hasImage) return 'IMAGE_ONLY';
+    if (hasCaption) return 'TEXT_ONLY';
+    return 'UNKNOWN';
+  }
+
+  /// Writes bytes to a temp file on mobile so background_downloader (which
+  /// only accepts file paths, not in-memory bytes) has something to upload.
+  /// Never called on web — the web path uses Dio with bytes directly.
+  static Future<File> _bytesToTempFile(Uint8List bytes, String filename) async {
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/$filename');
+    await file.writeAsBytes(bytes, flush: true);
+    return file;
+  }
+
+  // ==========================================================================
+  // POST METHODS — IMAGE / TEXT POSTS (bytes-based, web + mobile)
   // ==========================================================================
 
   static Future<Map<String, dynamic>> createPost({
     required String userId,
     required String userName,
     String? caption,
-    File? image,
-    File? video,
-    File? videoThumbnail,
+    Uint8List? imageBytes,
+    String? imageName,
     void Function(int sent, int total)? onSendProgress,
   }) async {
     try {
@@ -49,39 +80,32 @@ class ApiService {
       debugPrint('📱 User ID: $userId');
       debugPrint('👤 User Name: $userName');
       if (caption != null) debugPrint('📝 Caption: $caption');
-      if (image != null) debugPrint('📁 Image path: ${image.path}');
-      if (video != null) debugPrint('🎥 Video path: ${video.path}');
-      if (videoThumbnail != null)
-        debugPrint('🖼️ Thumbnail path: ${videoThumbnail.path}');
+      if (imageBytes != null) {
+        debugPrint('📁 Image bytes: ${imageBytes.lengthInBytes}');
+      }
 
-      if ((caption == null || caption.isEmpty) &&
-          image == null &&
-          video == null) {
-        throw Exception('Please add a caption, image, or video');
+      if ((caption == null || caption.isEmpty) && imageBytes == null) {
+        throw Exception('Please add a caption or image');
       }
 
       Map<String, dynamic> formMap = {'userId': userId, 'userName': userName};
-
       if (caption != null && caption.isNotEmpty) {
         formMap['caption'] = caption;
       }
 
       FormData formData = FormData.fromMap(formMap);
 
-      if (image != null) {
-        if (!await image.exists()) {
-          throw Exception('Image file does not exist');
-        }
+      if (imageBytes != null) {
+        final sizeInMB = imageBytes.lengthInBytes / (1024 * 1024);
+        debugPrint('📏 Image size: ${sizeInMB.toStringAsFixed(2)} MB');
 
-        int fileSize = await image.length();
-        debugPrint('📏 Image size: ${(fileSize / 1024).toStringAsFixed(2)} KB');
-
-        if (fileSize > 10 * 1024 * 1024) {
+        if (sizeInMB > 10) {
           throw Exception('Image too large. Max size: 10MB');
         }
 
-        String extension = image.path.split('.').last.toLowerCase();
-        List<String> allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+        final name = imageName ?? 'image.jpg';
+        String extension = _extensionFromName(name, fallback: 'jpg');
+        const allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
         if (!allowedExtensions.contains(extension)) {
           throw Exception(
             'Invalid image format. Allowed: jpg, jpeg, png, gif, webp',
@@ -91,71 +115,20 @@ class ApiService {
         formData.files.add(
           MapEntry(
             'image',
-            await MultipartFile.fromFile(
-              image.path,
+            MultipartFile.fromBytes(
+              imageBytes,
               filename:
                   'post_${DateTime.now().millisecondsSinceEpoch}.$extension',
-            ),
-          ),
-        );
-      }
-
-      if (video != null) {
-        if (!await video.exists()) {
-          throw Exception('Video file does not exist');
-        }
-
-        int fileSize = await video.length();
-        debugPrint(
-          '📏 Video size: ${(fileSize / (1024 * 1024)).toStringAsFixed(2)} MB',
-        );
-
-        if (fileSize > 50 * 1024 * 1024) {
-          throw Exception('Video too large. Max size: 50MB');
-        }
-
-        String extension = video.path.split('.').last.toLowerCase();
-        List<String> allowedExtensions = ['mp4', 'mov', 'avi', 'mkv', 'webm'];
-        if (!allowedExtensions.contains(extension)) {
-          throw Exception(
-            'Invalid video format. Allowed: mp4, mov, avi, mkv, webm',
-          );
-        }
-
-        formData.files.add(
-          MapEntry(
-            'video',
-            await MultipartFile.fromFile(
-              video.path,
-              filename:
-                  'video_${DateTime.now().millisecondsSinceEpoch}.$extension',
-              contentType: DioMediaType('video', extension),
-            ),
-          ),
-        );
-      }
-
-      if (videoThumbnail != null) {
-        if (!await videoThumbnail.exists()) {
-          throw Exception('Video thumbnail file does not exist');
-        }
-
-        debugPrint('📤 Adding video thumbnail...');
-        formData.files.add(
-          MapEntry(
-            'videoThumbnail',
-            await MultipartFile.fromFile(
-              videoThumbnail.path,
-              filename:
-                  'thumbnail_${DateTime.now().millisecondsSinceEpoch}.jpg',
-              contentType: DioMediaType('image', 'jpeg'),
+              contentType: DioMediaType(
+                  'image', extension == 'jpg' ? 'jpeg' : extension),
             ),
           ),
         );
       }
 
       debugPrint('🚀 Sending POST request to /api/posts');
-      debugPrint('📋 Post type: ${_getPostType(caption, image, video)}');
+      debugPrint(
+          '📋 Post type: ${_getPostType(caption, imageBytes != null, false)}');
 
       Response response = await _dio.post(
         '/api/posts',
@@ -209,146 +182,194 @@ class ApiService {
     }
   }
 
-  static String _getPostType(String? caption, File? image, File? video) {
-    final hasCaption = caption != null && caption.isNotEmpty;
-    final hasImage = image != null;
-    final hasVideo = video != null;
+  // ==========================================================================
+  // POST METHODS — VIDEO POSTS
+  // ==========================================================================
 
-    if (hasCaption && hasVideo) return 'TEXT_AND_VIDEO';
-    if (hasCaption && hasImage) return 'TEXT_AND_IMAGE';
-    if (hasVideo) return 'VIDEO_ONLY';
-    if (hasImage) return 'IMAGE_ONLY';
-    if (hasCaption) return 'TEXT_ONLY';
-    return 'UNKNOWN';
-  }
-
-// ==========================================================================
-// BACKGROUND VIDEO UPLOAD (survives app backgrounding)
-// ==========================================================================
-
+  /// Mobile only. Uses background_downloader (native OS upload session) so
+  /// the upload survives the app being backgrounded. background_downloader
+  /// requires a real file path, so bytes are written to a temp file first,
+  /// uploaded, then the temp file is cleaned up.
   static Future<Map<String, dynamic>> createPostWithBackgroundVideo({
     required String userId,
     required String userName,
     String? caption,
-    required File video,
-    File? videoThumbnail,
+    required Uint8List videoBytes,
+    required String videoName,
+    Uint8List? videoThumbnailBytes,
+    String? videoThumbnailName,
     void Function(double progress)? onProgress,
   }) async {
-    if (!await video.exists()) {
-      throw Exception('Video file does not exist');
+    if (kIsWeb) {
+      // Safety net — callers should route web through createPostWithVideoBytes.
+      return createPostWithVideoBytes(
+        userId: userId,
+        userName: userName,
+        caption: caption,
+        videoBytes: videoBytes,
+        videoName: videoName,
+        videoThumbnailBytes: videoThumbnailBytes,
+        videoThumbnailName: videoThumbnailName,
+        onSendProgress: (sent, total) {
+          if (total > 0) onProgress?.call(sent / total);
+        },
+      );
     }
 
-    int fileSize = await video.length();
-    if (fileSize > 50 * 1024 * 1024) {
+    final sizeInMB = videoBytes.lengthInBytes / (1024 * 1024);
+    if (sizeInMB > 50) {
       throw Exception('Video too large. Max size: 50MB');
     }
 
-    String extension = video.path.split('.').last.toLowerCase();
+    String extension = _extensionFromName(videoName, fallback: 'mp4');
     const allowed = ['mp4', 'mov', 'avi', 'mkv', 'webm'];
     if (!allowed.contains(extension)) {
       throw Exception(
           'Invalid video format. Allowed: mp4, mov, avi, mkv, webm');
     }
 
-    final fields = <String, String>{
-      'userId': userId,
-      'userName': userName,
-      if (caption != null && caption.isNotEmpty) 'caption': caption,
-    };
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final videoFile =
+        await _bytesToTempFile(videoBytes, 'post_video_$ts.$extension');
+    File? thumbFile;
+    if (videoThumbnailBytes != null) {
+      thumbFile =
+          await _bytesToTempFile(videoThumbnailBytes, 'post_thumb_$ts.jpg');
+    }
 
-    final files = <(String, String)>[
-      ('video', video.path),
-      if (videoThumbnail != null && await videoThumbnail.exists())
-        ('videoThumbnail', videoThumbnail.path),
-    ];
+    try {
+      final fields = <String, String>{
+        'userId': userId,
+        'userName': userName,
+        if (caption != null && caption.isNotEmpty) 'caption': caption,
+      };
 
-    final task = MultiUploadTask(
-      taskId: 'post_video_${DateTime.now().millisecondsSinceEpoch}',
-      url: 'https://clash-api-m5mr.onrender.com/api/posts',
-      files: files,
-      fields: fields,
-      updates: Updates.statusAndProgress,
-    );
+      final files = <(String, String)>[
+        ('video', videoFile.path),
+        if (thumbFile != null) ('videoThumbnail', thumbFile.path),
+      ];
 
-    final result = await FileDownloader().upload(
-      task,
-      onProgress: (progress) => onProgress?.call(progress),
-    );
+      final task = MultiUploadTask(
+        taskId: 'post_video_$ts',
+        url: 'https://clash-api-m5mr.onrender.com/api/posts',
+        files: files,
+        fields: fields,
+        updates: Updates.statusAndProgress,
+      );
 
-    if (result.status != TaskStatus.complete) {
+      final result = await FileDownloader().upload(
+        task,
+        onProgress: (progress) => onProgress?.call(progress),
+      );
+
+      if (result.status != TaskStatus.complete) {
+        throw Exception(
+          'Video upload failed: ${result.status} ${result.responseBody ?? ''}',
+        );
+      }
+
+      final body = result.responseBody;
+      if (body == null || body.isEmpty) {
+        throw Exception('Empty response from server');
+      }
+
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      if (data['success'] != true) {
+        throw Exception(data['message'] ?? 'Failed to create post');
+      }
+      return data;
+    } finally {
+      // Clean up temp files regardless of success/failure.
+      if (await videoFile.exists()) await videoFile.delete();
+      if (thumbFile != null && await thumbFile.exists())
+        await thumbFile.delete();
+    }
+  }
+
+  /// Web (and general) fallback. No native background-upload session exists
+  /// in a browser, so this is a plain Dio multipart upload straight from
+  /// bytes — it just won't survive the tab being backgrounded/closed.
+  static Future<Map<String, dynamic>> createPostWithVideoBytes({
+    required String userId,
+    required String userName,
+    String? caption,
+    required Uint8List videoBytes,
+    required String videoName,
+    Uint8List? videoThumbnailBytes,
+    String? videoThumbnailName,
+    void Function(int sent, int total)? onSendProgress,
+  }) async {
+    final sizeInMB = videoBytes.lengthInBytes / (1024 * 1024);
+    if (sizeInMB > 50) {
+      throw Exception('Video too large. Max size: 50MB');
+    }
+
+    String extension = _extensionFromName(videoName, fallback: 'mp4');
+    const allowed = ['mp4', 'mov', 'avi', 'mkv', 'webm'];
+    if (!allowed.contains(extension)) {
       throw Exception(
-        'Video upload failed: ${result.status} '
-        '${result.responseBody ?? ''}',
+          'Invalid video format. Allowed: mp4, mov, avi, mkv, webm');
+    }
+
+    final ts = DateTime.now().millisecondsSinceEpoch;
+
+    Map<String, dynamic> formMap = {'userId': userId, 'userName': userName};
+    if (caption != null && caption.isNotEmpty) formMap['caption'] = caption;
+
+    FormData formData = FormData.fromMap(formMap);
+
+    formData.files.add(
+      MapEntry(
+        'video',
+        MultipartFile.fromBytes(
+          videoBytes,
+          filename: 'video_$ts.$extension',
+          contentType: DioMediaType('video', extension),
+        ),
+      ),
+    );
+
+    if (videoThumbnailBytes != null) {
+      formData.files.add(
+        MapEntry(
+          'videoThumbnail',
+          MultipartFile.fromBytes(
+            videoThumbnailBytes,
+            filename: 'thumbnail_$ts.jpg',
+            contentType: DioMediaType('image', 'jpeg'),
+          ),
+        ),
       );
     }
 
-    final body = result.responseBody;
-    if (body == null || body.isEmpty) {
-      throw Exception('Empty response from server');
-    }
-
-    final data = jsonDecode(body) as Map<String, dynamic>;
-    if (data['success'] != true) {
-      throw Exception(data['message'] ?? 'Failed to create post');
-    }
-    return data;
-  }
-
-  static Future<Map<String, String>?> uploadChatVideoWithThumbnailBackground({
-    required File videoFile,
-    required File thumbnailFile,
-    required String userId,
-    String? authToken,
-    String? caption,
-  }) async {
-    if (!await videoFile.exists()) throw Exception('Video file does not exist');
-    if (!await thumbnailFile.exists())
-      throw Exception('Thumbnail file does not exist');
-
-    int fileSize = await videoFile.length();
-    if (fileSize > 50 * 1024 * 1024) {
-      throw Exception('Video must be less than 50MB');
-    }
-
-    final fields = <String, String>{
-      'userId': userId,
-      if (caption != null && caption.isNotEmpty) 'caption': caption,
-    };
-
-    final task = MultiUploadTask(
-      taskId: 'chat_video_${DateTime.now().millisecondsSinceEpoch}',
-      url: 'https://clash-api-m5mr.onrender.com/api/channels/media/upload',
-      files: [
-        ('file', videoFile.path),
-        ('thumbnail', thumbnailFile.path),
-      ],
-      fields: fields,
-      headers:
-          authToken != null ? {'Authorization': 'Bearer $authToken'} : null,
-      updates: Updates.statusAndProgress,
+    Response response = await _dio.post(
+      '/api/posts',
+      data: formData,
+      options: Options(
+        headers: {'Content-Type': 'multipart/form-data'},
+        validateStatus: (status) => status! < 500,
+        sendTimeout: const Duration(minutes: 5),
+        receiveTimeout: const Duration(minutes: 5),
+      ),
+      onSendProgress: onSendProgress,
     );
 
-    final result = await FileDownloader().upload(task);
-
-    if (result.status != TaskStatus.complete || result.responseBody == null) {
-      debugPrint('❌ Background chat video upload failed: ${result.status}');
-      return null;
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      Map<String, dynamic> data = response.data;
+      if (data['success'] == true) return data;
+      throw Exception(data['message'] ?? 'Failed to create post');
     }
-
-    final data = jsonDecode(result.responseBody!) as Map<String, dynamic>;
-    return {
-      'url': data['url'] ?? '',
-      'thumbnail_url': data['thumbnail_url'] ?? data['thumbnailUrl'] ?? '',
-    };
+    throw Exception('Server error: ${response.statusCode}');
   }
 
   // ==========================================================================
   // CHAT MEDIA UPLOAD METHODS
   // ==========================================================================
 
-  /// ✅ Upload image for chat message
+  /// Bytes-based — works on web + mobile.
   static Future<String?> uploadChatImage({
-    required File imageFile,
+    required Uint8List imageBytes,
+    required String imageName,
     required String userId,
     String? authToken,
     String? caption,
@@ -356,27 +377,21 @@ class ApiService {
     try {
       debugPrint('📤 Uploading chat image...');
 
-      if (!await imageFile.exists()) {
-        throw Exception('Image file does not exist');
-      }
-
-      int fileSize = await imageFile.length();
-      if (fileSize > 10 * 1024 * 1024) {
+      final sizeInMB = imageBytes.lengthInBytes / (1024 * 1024);
+      if (sizeInMB > 10) {
         throw Exception('Image too large. Max size: 10MB');
       }
 
-      String extension = imageFile.path.split('.').last.toLowerCase();
+      String extension = _extensionFromName(imageName, fallback: 'jpg');
       String fileName =
           'chat_image_${DateTime.now().millisecondsSinceEpoch}.$extension';
 
       FormData formData = FormData.fromMap({
-        'file': await MultipartFile.fromFile(
-          imageFile.path,
+        'file': MultipartFile.fromBytes(
+          imageBytes,
           filename: fileName,
-          contentType: DioMediaType(
-            'image',
-            extension == 'png' ? 'png' : 'jpeg',
-          ),
+          contentType:
+              DioMediaType('image', extension == 'png' ? 'png' : 'jpeg'),
         ),
         'userId': userId,
         if (caption != null && caption.isNotEmpty) 'caption': caption,
@@ -419,10 +434,13 @@ class ApiService {
     }
   }
 
-  /// ✅ Upload video for chat message with thumbnail
+  /// Mobile only — plain Dio multipart from bytes, no background session.
+  /// Kept for callers that explicitly want a foreground upload on mobile.
   static Future<Map<String, String>?> uploadChatVideoWithThumbnail({
-    required File videoFile,
-    required File thumbnailFile,
+    required Uint8List videoBytes,
+    required String videoName,
+    required Uint8List thumbnailBytes,
+    required String thumbnailName,
     required String userId,
     String? authToken,
     String? caption,
@@ -430,33 +448,24 @@ class ApiService {
     try {
       debugPrint('📤 Uploading chat video with thumbnail...');
 
-      if (!await videoFile.exists()) {
-        throw Exception('Video file does not exist');
-      }
-      if (!await thumbnailFile.exists()) {
-        throw Exception('Thumbnail file does not exist');
-      }
-
-      int fileSize = await videoFile.length();
-      if (fileSize > 50 * 1024 * 1024) {
-        debugPrint(
-          '⚠️ Video too large: ${(fileSize / (1024 * 1024)).toStringAsFixed(2)}MB',
-        );
+      final sizeInMB = videoBytes.lengthInBytes / (1024 * 1024);
+      if (sizeInMB > 50) {
+        debugPrint('⚠️ Video too large: ${sizeInMB.toStringAsFixed(2)}MB');
         throw Exception('Video must be less than 50MB');
       }
 
-      String extension = videoFile.path.split('.').last.toLowerCase();
+      String extension = _extensionFromName(videoName, fallback: 'mp4');
       String fileName =
           'chat_video_${DateTime.now().millisecondsSinceEpoch}.$extension';
 
       FormData formData = FormData.fromMap({
-        'file': await MultipartFile.fromFile(
-          videoFile.path,
+        'file': MultipartFile.fromBytes(
+          videoBytes,
           filename: fileName,
           contentType: DioMediaType('video', extension),
         ),
-        'thumbnail': await MultipartFile.fromFile(
-          thumbnailFile.path,
+        'thumbnail': MultipartFile.fromBytes(
+          thumbnailBytes,
           filename: 'thumbnail_${DateTime.now().millisecondsSinceEpoch}.jpg',
           contentType: DioMediaType('image', 'jpeg'),
         ),
@@ -489,8 +498,7 @@ class ApiService {
       debugPrint('❌ Video upload error: ${e.message}');
       if (e.type == DioExceptionType.connectionTimeout) {
         throw Exception(
-          'Upload timeout. Please try again with a smaller video.',
-        );
+            'Upload timeout. Please try again with a smaller video.');
       }
       return null;
     } catch (e) {
@@ -499,11 +507,148 @@ class ApiService {
     }
   }
 
+  /// Mobile only. Routes through background_downloader (native OS upload
+  /// session), which requires file paths — bytes are written to temp files
+  /// first and cleaned up after.
+  static Future<Map<String, String>?> uploadChatVideoWithThumbnailBackground({
+    required Uint8List videoBytes,
+    required String videoName,
+    required Uint8List thumbnailBytes,
+    required String thumbnailName,
+    required String userId,
+    String? authToken,
+    String? caption,
+  }) async {
+    if (kIsWeb) {
+      // Safety net — callers should route web through the bytes variant.
+      return uploadChatVideoWithThumbnailBytes(
+        videoBytes: videoBytes,
+        videoName: videoName,
+        thumbnailBytes: thumbnailBytes,
+        thumbnailName: thumbnailName,
+        userId: userId,
+        authToken: authToken,
+        caption: caption,
+      );
+    }
+
+    final sizeInMB = videoBytes.lengthInBytes / (1024 * 1024);
+    if (sizeInMB > 50) {
+      throw Exception('Video must be less than 50MB');
+    }
+
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    String extension = _extensionFromName(videoName, fallback: 'mp4');
+    final videoFile =
+        await _bytesToTempFile(videoBytes, 'chat_video_$ts.$extension');
+    final thumbFile =
+        await _bytesToTempFile(thumbnailBytes, 'chat_thumb_$ts.jpg');
+
+    try {
+      final fields = <String, String>{
+        'userId': userId,
+        if (caption != null && caption.isNotEmpty) 'caption': caption,
+      };
+
+      final task = MultiUploadTask(
+        taskId: 'chat_video_$ts',
+        url: 'https://clash-api-m5mr.onrender.com/api/channels/media/upload',
+        files: [
+          ('file', videoFile.path),
+          ('thumbnail', thumbFile.path),
+        ],
+        fields: fields,
+        headers:
+            authToken != null ? {'Authorization': 'Bearer $authToken'} : null,
+        updates: Updates.statusAndProgress,
+      );
+
+      final result = await FileDownloader().upload(task);
+
+      if (result.status != TaskStatus.complete || result.responseBody == null) {
+        debugPrint('❌ Background chat video upload failed: ${result.status}');
+        return null;
+      }
+
+      final data = jsonDecode(result.responseBody!) as Map<String, dynamic>;
+      return {
+        'url': data['url'] ?? '',
+        'thumbnail_url': data['thumbnail_url'] ?? data['thumbnailUrl'] ?? '',
+      };
+    } finally {
+      if (await videoFile.exists()) await videoFile.delete();
+      if (await thumbFile.exists()) await thumbFile.delete();
+    }
+  }
+
+  /// Web fallback for chat video — plain Dio multipart from bytes.
+  static Future<Map<String, String>?> uploadChatVideoWithThumbnailBytes({
+    required Uint8List videoBytes,
+    required String videoName,
+    required Uint8List thumbnailBytes,
+    required String thumbnailName,
+    required String userId,
+    String? authToken,
+    String? caption,
+  }) async {
+    try {
+      final sizeInMB = videoBytes.lengthInBytes / (1024 * 1024);
+      if (sizeInMB > 50) {
+        throw Exception('Video must be less than 50MB');
+      }
+
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      String extension = _extensionFromName(videoName, fallback: 'mp4');
+
+      FormData formData = FormData.fromMap({
+        'file': MultipartFile.fromBytes(
+          videoBytes,
+          filename: 'chat_video_$ts.$extension',
+          contentType: DioMediaType('video', extension),
+        ),
+        'thumbnail': MultipartFile.fromBytes(
+          thumbnailBytes,
+          filename: 'chat_thumb_$ts.jpg',
+          contentType: DioMediaType('image', 'jpeg'),
+        ),
+        'userId': userId,
+        if (caption != null && caption.isNotEmpty) 'caption': caption,
+      });
+
+      Response response = await _dio.post(
+        '/api/channels/media/upload',
+        data: formData,
+        options: Options(
+          headers: {
+            'Content-Type': 'multipart/form-data',
+            if (authToken != null) 'Authorization': 'Bearer $authToken',
+          },
+          sendTimeout: const Duration(minutes: 5),
+          receiveTimeout: const Duration(minutes: 5),
+        ),
+      );
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final data = response.data;
+        return {
+          'url': data['url'] ?? '',
+          'thumbnail_url': data['thumbnail_url'] ?? data['thumbnailUrl'] ?? '',
+        };
+      }
+      return null;
+    } on DioException catch (e) {
+      debugPrint('❌ Chat video (web) upload error: ${e.message}');
+      return null;
+    } catch (e) {
+      debugPrint('❌ Chat video (web) upload error: $e');
+      return null;
+    }
+  }
+
   // ==========================================================================
-  // CHAT MESSAGE METHODS
+  // CHAT MESSAGE METHODS (unchanged)
   // ==========================================================================
 
-  /// ✅ Get chat messages from a channel
   static Future<List<Map<String, dynamic>>> getChannelMessages({
     required String channelId,
     String? fixtureId,
@@ -553,7 +698,6 @@ class ApiService {
     }
   }
 
-  /// ✅ Send a chat message to a channel with tempId support
   static Future<bool> sendChannelMessage({
     required String channelId,
     required String userId,
@@ -572,13 +716,12 @@ class ApiService {
     String? replyToUsername,
     String? replyToSelection,
     String? authToken,
-    String? tempId, // ✅ Add tempId for pending message tracking
+    String? tempId,
   }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = authToken ?? prefs.getString('auth_token');
 
-      // ✅ Build request body - all snake_case to match Rust
       final Map<String, dynamic> body = {
         'user_id': userId,
         'username': username,
@@ -587,30 +730,18 @@ class ApiService {
         'is_video': isVideo,
       };
 
-      // Optional fields - only include if not null/empty
-      if (selection != null && selection.isNotEmpty) {
+      if (selection != null && selection.isNotEmpty)
         body['selection'] = selection;
-      }
-      if (fixtureId != null && fixtureId.isNotEmpty) {
+      if (fixtureId != null && fixtureId.isNotEmpty)
         body['fixture_id'] = fixtureId;
-      }
-      if (imageUrl != null && imageUrl.isNotEmpty) {
-        body['image_url'] = imageUrl;
-      }
-      if (videoUrl != null && videoUrl.isNotEmpty) {
-        body['video_url'] = videoUrl;
-      }
+      if (imageUrl != null && imageUrl.isNotEmpty) body['image_url'] = imageUrl;
+      if (videoUrl != null && videoUrl.isNotEmpty) body['video_url'] = videoUrl;
       if (videoThumbnailUrl != null && videoThumbnailUrl.isNotEmpty) {
         body['video_thumbnail_url'] = videoThumbnailUrl;
       }
-      if (caption != null && caption.isNotEmpty) {
-        body['caption'] = caption;
-      }
-      if (tempId != null && tempId.isNotEmpty) {
-        body['temp_id'] = tempId; // ✅ Send tempId to server
-      }
+      if (caption != null && caption.isNotEmpty) body['caption'] = caption;
+      if (tempId != null && tempId.isNotEmpty) body['temp_id'] = tempId;
 
-      // ✅ Reply fields - flat structure (not nested)
       if (replyToMessageId != null && replyToMessageId.isNotEmpty) {
         body['reply_to_id'] = replyToMessageId;
         body['reply_to_text'] = replyToText ?? '';
@@ -656,7 +787,7 @@ class ApiService {
   }
 
   // ==========================================================================
-  // EXISTING POST METHODS
+  // EXISTING POST METHODS (unchanged)
   // ==========================================================================
 
   static Future<Map<String, dynamic>> getPosts({
@@ -671,10 +802,8 @@ class ApiService {
         'userId': userId,
       };
 
-      Response response = await _dio.get(
-        '/api/posts',
-        queryParameters: queryParams,
-      );
+      Response response =
+          await _dio.get('/api/posts', queryParameters: queryParams);
 
       return {
         'posts': response.data['posts'] ?? [],
@@ -728,9 +857,7 @@ class ApiService {
   }
 
   static Future<bool> updatePostCaption(
-    String postId,
-    String newCaption,
-  ) async {
+      String postId, String newCaption) async {
     try {
       Response response = await _dio.put(
         '/api/posts/$postId/caption',
@@ -772,7 +899,7 @@ class ApiService {
   }
 
   // ==========================================================================
-  // FOLLOWERS / FOLLOWING METHODS
+  // FOLLOWERS / FOLLOWING METHODS (unchanged)
   // ==========================================================================
 
   static Future<List<Map<String, dynamic>>> getUserFollowers(
@@ -821,9 +948,7 @@ class ApiService {
       }
     } on DioException catch (e) {
       debugPrint('❌ Error fetching followers: ${e.message}');
-      if (e.response?.statusCode == 404) {
-        return [];
-      }
+      if (e.response?.statusCode == 404) return [];
       return [];
     } catch (e) {
       debugPrint('❌ Unexpected error fetching followers: $e');
@@ -947,7 +1072,7 @@ class ApiService {
   }
 
   // ==========================================================================
-  // SUB-FIXTURE (PROP BETS) METHODS
+  // SUB-FIXTURE (PROP BETS) METHODS (unchanged)
   // ==========================================================================
 
   static Future<List<Map<String, dynamic>>?> getSubFixtures({
@@ -989,9 +1114,7 @@ class ApiService {
         options: Options(headers: _getHeaders(authToken: authToken)),
       );
 
-      if (response.statusCode == 200) {
-        return response.data;
-      }
+      if (response.statusCode == 200) return response.data;
       return null;
     } on DioException catch (e) {
       debugPrint('Error fetching sub-fixture: ${e.message}');
@@ -1000,16 +1123,11 @@ class ApiService {
   }
 
   static Future<Map<String, dynamic>?> getSubFixtureStats(
-    String subFixtureId,
-  ) async {
+      String subFixtureId) async {
     try {
-      final response = await _dio.get(
-        '/api/votes/sub-fixture/$subFixtureId/stats',
-      );
-
-      if (response.statusCode == 200) {
-        return response.data;
-      }
+      final response =
+          await _dio.get('/api/votes/sub-fixture/$subFixtureId/stats');
+      if (response.statusCode == 200) return response.data;
       return null;
     } on DioException catch (e) {
       debugPrint('Error fetching sub-fixture stats: ${e.message}');
@@ -1109,13 +1227,9 @@ class ApiService {
     String userId,
   ) async {
     try {
-      final response = await _dio.get(
-        '/api/votes/sub-fixture/$subFixtureId/user/$userId',
-      );
-
-      if (response.statusCode == 200) {
-        return response.data;
-      }
+      final response =
+          await _dio.get('/api/votes/sub-fixture/$subFixtureId/user/$userId');
+      if (response.statusCode == 200) return response.data;
       return null;
     } on DioException catch (e) {
       debugPrint('Error checking user sub-fixture vote: ${e.message}');
@@ -1128,10 +1242,8 @@ class ApiService {
     String fixtureId,
   ) async {
     try {
-      final response = await _dio.get(
-        '/api/votes/user/$userId/fixture/$fixtureId/sub-votes',
-      );
-
+      final response = await _dio
+          .get('/api/votes/user/$userId/fixture/$fixtureId/sub-votes');
       if (response.statusCode == 200) {
         return List<Map<String, dynamic>>.from(response.data);
       }
@@ -1147,10 +1259,8 @@ class ApiService {
     String userId,
   ) async {
     try {
-      final response = await _dio.get(
-        '/api/votes/sub-fixtures/fixture/$fixtureId/user/$userId',
-      );
-
+      final response = await _dio
+          .get('/api/votes/sub-fixtures/fixture/$fixtureId/user/$userId');
       if (response.statusCode == 200) {
         return List<Map<String, dynamic>>.from(response.data);
       }
@@ -1162,16 +1272,11 @@ class ApiService {
   }
 
   static Future<Map<String, dynamic>?> getSubFixtureVoteCounts(
-    String subFixtureId,
-  ) async {
+      String subFixtureId) async {
     try {
-      final response = await _dio.get(
-        '/api/votes/sub-fixture/$subFixtureId/counts',
-      );
-
-      if (response.statusCode == 200) {
-        return response.data;
-      }
+      final response =
+          await _dio.get('/api/votes/sub-fixture/$subFixtureId/counts');
+      if (response.statusCode == 200) return response.data;
       return null;
     } on DioException catch (e) {
       debugPrint('Error fetching sub-fixture vote counts: ${e.message}');
@@ -1199,9 +1304,8 @@ class ApiService {
     }
   }
 
-  static Future<List<Map<String, dynamic>>?> getTrendingSubFixtures({
-    int limit = 10,
-  }) async {
+  static Future<List<Map<String, dynamic>>?> getTrendingSubFixtures(
+      {int limit = 10}) async {
     try {
       final response = await _dio.get(
         '/api/votes/stats/sub-fixtures/trending',
@@ -1229,9 +1333,7 @@ class ApiService {
         options: Options(headers: _getHeaders(authToken: authToken)),
       );
 
-      if (response.statusCode == 200) {
-        return response.data;
-      }
+      if (response.statusCode == 200) return response.data;
       return null;
     } on DioException catch (e) {
       debugPrint('Error fetching bulk sub-fixture stats: ${e.message}');

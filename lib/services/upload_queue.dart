@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'api_services.dart';
 import 'notification_service.dart';
@@ -12,27 +12,36 @@ class UploadTask {
   final String userId;
   final String userName;
   final String? caption;
-  final File? image;
-  final File? video;
-  final File? videoThumbnail;
+
+  // Bytes-based media (works on web + mobile)
+  final Uint8List? imageBytes;
+  final String? imageName;
+  final Uint8List? videoBytes;
+  final String? videoName;
+  final Uint8List? videoThumbnailBytes;
+  final String? videoThumbnailName;
+
   final UploadType uploadType;
   final String? channelId;
   final String? fixtureId;
-  final String? tempId; // ✅ For pending message tracking
+  final String? tempId;
   double progress;
   UploadStatus status;
   String? error;
-  String? resultUrl; // ✅ Store uploaded URL
-  String? thumbnailUrl; // ✅ Store thumbnail URL
+  String? resultUrl;
+  String? thumbnailUrl;
 
   UploadTask({
     required this.id,
     required this.userId,
     required this.userName,
     this.caption,
-    this.image,
-    this.video,
-    this.videoThumbnail,
+    this.imageBytes,
+    this.imageName,
+    this.videoBytes,
+    this.videoName,
+    this.videoThumbnailBytes,
+    this.videoThumbnailName,
     this.uploadType = UploadType.post,
     this.channelId,
     this.fixtureId,
@@ -44,23 +53,10 @@ class UploadTask {
     this.thumbnailUrl,
   });
 
-  // ✅ Helper to check if this is a chat upload
   bool get isChatUpload => uploadType != UploadType.post;
-
-  // ✅ Helper to check if this is a media upload
-  bool get hasMedia => image != null || video != null;
+  bool get hasMedia => imageBytes != null || videoBytes != null;
 }
 
-/// Runs uploads independent of any page/widget lifecycle.
-/// Enqueue an upload and it keeps uploading even if the modal that
-/// created it is popped or the user navigates elsewhere.
-///
-/// NOTE: Any upload that includes a video is routed through
-/// background_downloader (see ApiService.createPostWithBackgroundVideo /
-/// ApiService.uploadChatVideoWithThumbnailBackground). Those run in a
-/// native background session (NSURLSession / WorkManager) that survives
-/// the app being backgrounded, unlike a plain Dio request. Image/text-only
-/// uploads stay on the existing Dio path since they complete quickly.
 class UploadQueueService extends ChangeNotifier {
   UploadQueueService._internal();
   static final UploadQueueService _instance = UploadQueueService._internal();
@@ -73,28 +69,17 @@ class UploadQueueService extends ChangeNotifier {
   final List<void Function(String url, String? thumbnail)>
       _onChatMediaUploadedListeners = [];
 
-  /// Register a callback to run whenever any queued post finishes
-  /// successfully (e.g. to refresh a posts feed). Safe to call from
-  /// initState of a page that may or may not still be mounted later —
-  /// always pair with removeOnPostCreatedListener in dispose().
-  void addOnPostCreatedListener(VoidCallback cb) {
-    _onPostCreatedListeners.add(cb);
-  }
+  void addOnPostCreatedListener(VoidCallback cb) =>
+      _onPostCreatedListeners.add(cb);
+  void removeOnPostCreatedListener(VoidCallback cb) =>
+      _onPostCreatedListeners.remove(cb);
 
-  void removeOnPostCreatedListener(VoidCallback cb) {
-    _onPostCreatedListeners.remove(cb);
-  }
-
-  /// ✅ Register a callback for chat media upload completions
   void addOnChatMediaUploadedListener(
-      void Function(String url, String? thumbnail) cb) {
-    _onChatMediaUploadedListeners.add(cb);
-  }
-
+          void Function(String url, String? thumbnail) cb) =>
+      _onChatMediaUploadedListeners.add(cb);
   void removeOnChatMediaUploadedListener(
-      void Function(String url, String? thumbnail) cb) {
-    _onChatMediaUploadedListeners.remove(cb);
-  }
+          void Function(String url, String? thumbnail) cb) =>
+      _onChatMediaUploadedListeners.remove(cb);
 
   // ==========================================================================
   // POST UPLOAD
@@ -104,9 +89,12 @@ class UploadQueueService extends ChangeNotifier {
     required String userId,
     required String userName,
     String? caption,
-    File? image,
-    File? video,
-    File? videoThumbnail,
+    Uint8List? imageBytes,
+    String? imageName,
+    Uint8List? videoBytes,
+    String? videoName,
+    Uint8List? videoThumbnailBytes,
+    String? videoThumbnailName,
   }) {
     final id = 'post_${DateTime.now().millisecondsSinceEpoch}_$userId';
     final task = UploadTask(
@@ -114,9 +102,12 @@ class UploadQueueService extends ChangeNotifier {
       userId: userId,
       userName: userName,
       caption: caption,
-      image: image,
-      video: video,
-      videoThumbnail: videoThumbnail,
+      imageBytes: imageBytes,
+      imageName: imageName,
+      videoBytes: videoBytes,
+      videoName: videoName,
+      videoThumbnailBytes: videoThumbnailBytes,
+      videoThumbnailName: videoThumbnailName,
       uploadType: UploadType.post,
     );
     _tasks.add(task);
@@ -128,28 +119,28 @@ class UploadQueueService extends ChangeNotifier {
   }
 
   // ==========================================================================
-  // CHAT MEDIA UPLOADS - BACKGROUND
+  // CHAT MEDIA UPLOADS
   // ==========================================================================
 
-  /// ✅ Enqueue chat image upload - runs in background
   String enqueueChatImage({
     required String userId,
     required String userName,
-    required File imageFile,
+    required Uint8List imageBytes,
+    required String imageName,
     String? caption,
     String? channelId,
     String? fixtureId,
     String? tempId,
     String? authToken,
-    required void Function(String url)
-        onSuccess, // ✅ Callback for when upload completes
+    required void Function(String url) onSuccess,
   }) {
     final id = 'chat_img_${DateTime.now().millisecondsSinceEpoch}_$userId';
     final task = UploadTask(
       id: id,
       userId: userId,
       userName: userName,
-      image: imageFile,
+      imageBytes: imageBytes,
+      imageName: imageName,
       caption: caption,
       uploadType: UploadType.chatImage,
       channelId: channelId,
@@ -164,27 +155,29 @@ class UploadQueueService extends ChangeNotifier {
     return id;
   }
 
-  /// ✅ Enqueue chat video upload - runs in background
   String enqueueChatVideo({
     required String userId,
     required String userName,
-    required File videoFile,
-    required File thumbnailFile,
+    required Uint8List videoBytes,
+    required String videoName,
+    required Uint8List thumbnailBytes,
+    required String thumbnailName,
     String? caption,
     String? channelId,
     String? fixtureId,
     String? tempId,
     String? authToken,
-    required void Function(String url, String thumbnail)
-        onSuccess, // ✅ Callback for when upload completes
+    required void Function(String url, String thumbnail) onSuccess,
   }) {
     final id = 'chat_vid_${DateTime.now().millisecondsSinceEpoch}_$userId';
     final task = UploadTask(
       id: id,
       userId: userId,
       userName: userName,
-      video: videoFile,
-      videoThumbnail: thumbnailFile,
+      videoBytes: videoBytes,
+      videoName: videoName,
+      videoThumbnailBytes: thumbnailBytes,
+      videoThumbnailName: thumbnailName,
       caption: caption,
       uploadType: UploadType.chatVideo,
       channelId: channelId,
@@ -207,27 +200,50 @@ class UploadQueueService extends ChangeNotifier {
     try {
       final Map<String, dynamic> postData;
 
-      if (task.video != null) {
-        // ✅ Video posts go through background_downloader so the upload
-        // survives the app being backgrounded (native OS upload session).
-        postData = await ApiService.createPostWithBackgroundVideo(
-          userId: task.userId,
-          userName: task.userName,
-          caption: task.caption,
-          video: task.video!,
-          videoThumbnail: task.videoThumbnail,
-          onProgress: (progress) {
-            task.progress = progress;
-            notifyListeners();
-          },
-        );
+      if (task.videoBytes != null) {
+        // NOTE: background_downloader (native OS upload session) has no
+        // web equivalent — browsers don't expose that concept. Route web
+        // through the same bytes-based Dio path used for images; keep the
+        // native background path for mobile so long uploads survive
+        // backgrounding there.
+        if (kIsWeb) {
+          postData = await ApiService.createPostWithVideoBytes(
+            userId: task.userId,
+            userName: task.userName,
+            caption: task.caption,
+            videoBytes: task.videoBytes!,
+            videoName: task.videoName ?? 'video.mp4',
+            videoThumbnailBytes: task.videoThumbnailBytes,
+            videoThumbnailName: task.videoThumbnailName,
+            onSendProgress: (sent, total) {
+              if (total > 0) {
+                task.progress = sent / total;
+                notifyListeners();
+              }
+            },
+          );
+        } else {
+          postData = await ApiService.createPostWithBackgroundVideo(
+            userId: task.userId,
+            userName: task.userName,
+            caption: task.caption,
+            videoBytes: task.videoBytes!,
+            videoName: task.videoName ?? 'video.mp4',
+            videoThumbnailBytes: task.videoThumbnailBytes,
+            videoThumbnailName: task.videoThumbnailName,
+            onProgress: (progress) {
+              task.progress = progress;
+              notifyListeners();
+            },
+          );
+        }
       } else {
-        // Image/text-only posts stay on the fast Dio path.
         postData = await ApiService.createPost(
           userId: task.userId,
           userName: task.userName,
           caption: task.caption,
-          image: task.image,
+          imageBytes: task.imageBytes,
+          imageName: task.imageName,
           onSendProgress: (sent, total) {
             if (total > 0) {
               task.progress = sent / total;
@@ -255,8 +271,8 @@ class UploadQueueService extends ChangeNotifier {
           userId: task.userId,
           userName: task.userName,
           caption: task.caption ?? '',
-          hasImage: task.image != null,
-          hasVideo: task.video != null,
+          hasImage: task.imageBytes != null,
+          hasVideo: task.videoBytes != null,
         );
       }
 
@@ -272,7 +288,6 @@ class UploadQueueService extends ChangeNotifier {
     }
   }
 
-  /// ✅ Background chat image upload
   Future<void> _runChatImageUpload(
     UploadTask task,
     String? authToken,
@@ -280,7 +295,8 @@ class UploadQueueService extends ChangeNotifier {
   ) async {
     try {
       final imageUrl = await ApiService.uploadChatImage(
-        imageFile: task.image!,
+        imageBytes: task.imageBytes!,
+        imageName: task.imageName ?? 'image.jpg',
         userId: task.userId,
         authToken: authToken,
         caption: task.caption,
@@ -292,15 +308,12 @@ class UploadQueueService extends ChangeNotifier {
         task.resultUrl = imageUrl;
         notifyListeners();
 
-        // ✅ Notify listeners
         for (final cb in _onChatMediaUploadedListeners) {
           cb(imageUrl, null);
         }
 
-        // ✅ Call the success callback
         onSuccess(imageUrl);
 
-        // ✅ Clean up after delay
         Future.delayed(const Duration(seconds: 3), () {
           _tasks.removeWhere((t) => t.id == task.id);
           notifyListeners();
@@ -319,25 +332,31 @@ class UploadQueueService extends ChangeNotifier {
     }
   }
 
-  /// ✅ Background chat video upload
-  /// Routed through background_downloader (native OS upload session) so it
-  /// survives the app being backgrounded mid-upload — this is what fixes
-  /// the "Failed to read video data: Error parsing multipart/form-data
-  /// request" errors that happened when the video upload was interrupted
-  /// by the app going into the background.
   Future<void> _runChatVideoUpload(
     UploadTask task,
     String? authToken,
     void Function(String url, String thumbnail) onSuccess,
   ) async {
     try {
-      final result = await ApiService.uploadChatVideoWithThumbnailBackground(
-        videoFile: task.video!,
-        thumbnailFile: task.videoThumbnail!,
-        userId: task.userId,
-        authToken: authToken,
-        caption: task.caption,
-      );
+      final result = kIsWeb
+          ? await ApiService.uploadChatVideoWithThumbnailBytes(
+              videoBytes: task.videoBytes!,
+              videoName: task.videoName ?? 'video.mp4',
+              thumbnailBytes: task.videoThumbnailBytes!,
+              thumbnailName: task.videoThumbnailName ?? 'thumb.jpg',
+              userId: task.userId,
+              authToken: authToken,
+              caption: task.caption,
+            )
+          : await ApiService.uploadChatVideoWithThumbnailBackground(
+              videoBytes: task.videoBytes!,
+              videoName: task.videoName ?? 'video.mp4',
+              thumbnailBytes: task.videoThumbnailBytes!,
+              thumbnailName: task.videoThumbnailName ?? 'thumb.jpg',
+              userId: task.userId,
+              authToken: authToken,
+              caption: task.caption,
+            );
 
       if (result != null) {
         final videoUrl = result['url']!;
@@ -349,15 +368,12 @@ class UploadQueueService extends ChangeNotifier {
         task.thumbnailUrl = thumbnailUrl;
         notifyListeners();
 
-        // ✅ Notify listeners
         for (final cb in _onChatMediaUploadedListeners) {
           cb(videoUrl, thumbnailUrl);
         }
 
-        // ✅ Call the success callback
         onSuccess(videoUrl, thumbnailUrl);
 
-        // ✅ Clean up after delay
         Future.delayed(const Duration(seconds: 3), () {
           _tasks.removeWhere((t) => t.id == task.id);
           notifyListeners();
@@ -396,9 +412,12 @@ class UploadQueueService extends ChangeNotifier {
       userId: old.userId,
       userName: old.userName,
       caption: old.caption,
-      image: old.image,
-      video: old.video,
-      videoThumbnail: old.videoThumbnail,
+      imageBytes: old.imageBytes,
+      imageName: old.imageName,
+      videoBytes: old.videoBytes,
+      videoName: old.videoName,
+      videoThumbnailBytes: old.videoThumbnailBytes,
+      videoThumbnailName: old.videoThumbnailName,
       uploadType: old.uploadType,
       channelId: old.channelId,
       fixtureId: old.fixtureId,
@@ -407,7 +426,6 @@ class UploadQueueService extends ChangeNotifier {
     _tasks.add(retry);
     notifyListeners();
 
-    // ✅ Retry based on type
     if (retry.uploadType == UploadType.chatImage) {
       _runChatImageUpload(retry, null, (_) {});
     } else if (retry.uploadType == UploadType.chatVideo) {
@@ -418,7 +436,7 @@ class UploadQueueService extends ChangeNotifier {
   }
 
   // ==========================================================================
-  // NOTIFICATIONS
+  // NOTIFICATIONS (unchanged)
   // ==========================================================================
 
   Future<void> _sendNewPostNotification({

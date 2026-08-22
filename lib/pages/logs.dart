@@ -719,8 +719,13 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
   // ============================================================
   // WEB SOCKET LISTENERS
   // ============================================================
+  bool _wsListenersSetup = false;
 
   void _setupWebSocketListeners() {
+
+
+      if (_wsListenersSetup) return;
+    _wsListenersSetup = true;
     final ws = WebSocketService();
 
     // Listen for new comments
@@ -3057,25 +3062,40 @@ Future<void> _openChat(HistoryItem item) async {
     return 'https://cdn-icons-png.flaticon.com/512/3095/3095243.png';
   }
 
-  @override
-  void dispose() {
-    FanTheme.controller.removeListener(_onThemeChanged);
-    _refreshTimer?.cancel();
-    _appCacheSubscription?.cancel();
-    WidgetsBinding.instance.removeObserver(this);
+ @override
+void dispose() {
+  FanTheme.controller.removeListener(_onThemeChanged);
+  _refreshTimer?.cancel();
+  _appCacheSubscription?.cancel();
+  WidgetsBinding.instance.removeObserver(this);
 
-    // Disconnect WebSocket
-    final ws = WebSocketService();
-    if (ws.isConnected) {
-      ws.disconnect();
+  // ✅ Leave only the rooms this page joined — never disconnect the
+  // shared socket, since ChatScreen/FixturesPage may be using it too.
+  final ws = WebSocketService();
+  for (var fixture in _liveGames) {
+    final item = _historyItems.firstWhere(
+      (h) => h.fixtureId == fixture.matchId,
+      orElse: () => HistoryItem.fromFixture(fixture),
+    );
+    final channelId = _resolveChannelIdFor(item);
+    if (channelId != null) {
+      ws.leaveChannelFixtureRoom(channelId, fixtureId: fixture.matchId);
     }
-
-    // Dispose comment controllers
-    for (var controller in _commentControllers.values) {
-      controller.dispose();
-    }
-    _commentControllers.clear();
-
-    super.dispose();
   }
+  for (var item in _historyItems) {
+    if (item.status == 'live' || item.status == 'half_time') {
+      final channelId = _resolveChannelIdFor(item);
+      if (channelId != null) {
+        ws.leaveChannelFixtureRoom(channelId, fixtureId: item.fixtureId);
+      }
+    }
+  }
+
+  for (var controller in _commentControllers.values) {
+    controller.dispose();
+  }
+  _commentControllers.clear();
+
+  super.dispose();
+}
 }
