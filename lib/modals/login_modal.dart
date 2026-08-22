@@ -9,6 +9,11 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
 import "../pages/fan_Funzy_design.dart";
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'dart:io' show Platform;
+import '../services/notification_service.dart';
+
+
 
 import '../services/auth_service.dart';
 
@@ -266,6 +271,15 @@ class _LoginContentState extends State<_LoginContent> {
     if (success) {
       developer.log('✅ Login successful via AuthService: $username ($userId)',
           name: 'LoginModal');
+
+      // ✅ Register FCM token now that we have a confirmed user_id.
+      // initializeFCM() in main.dart only registers if the user was ALREADY
+      // logged in at the moment it happened to run — for a fresh login
+      // during this session, that check fails and the token (already sitting
+      // in SharedPreferences under 'fcm_token') never reaches the backend.
+      // This closes that gap.
+      _registerFcmTokenAfterLogin(userId, token);
+
       widget.onLoginSuccess?.call(userId, username);
       if (mounted) Navigator.pop(context);
     } else {
@@ -273,6 +287,31 @@ class _LoginContentState extends State<_LoginContent> {
     }
   }
 
+  Future<void> _registerFcmTokenAfterLogin(
+      String userId, String authToken) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      String? fcmToken = prefs.getString('fcm_token');
+
+      // Fall back to a fresh fetch if it's not cached yet (e.g. permission
+      // was granted after initializeFCM() already gave up, or this is a
+      // very fast login before initializeFCM() finished).
+      fcmToken ??= await FirebaseMessaging.instance.getToken();
+
+      if (fcmToken != null) {
+        final platform = Platform.isIOS ? 'ios' : 'android';
+        await NotificationService.registerToken(
+          userId: userId,
+          fcmToken: fcmToken,
+          platform: platform,
+          authToken: authToken,
+        );
+      }
+    } catch (e) {
+      developer.log('⚠️ Post-login FCM registration failed: $e',
+          name: 'LoginModal');
+    }
+  }
   // ─────────────────────────────────────────
   //  STEP 1 — SEND OTP (with PIN fallback)
   // ─────────────────────────────────────────
