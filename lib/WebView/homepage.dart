@@ -11,6 +11,7 @@ import '../WebView/Hompage/sidebar_profile.dart';
 import '../WebView/Hompage/main_content_tabs.dart';
 import '../pages/fixture_page.dart';
 import "../pages/posts_page.dart";
+import '../modals/homepage/notifications_modal.dart';
 import '../pages/logs.dart';
 import '../../modals/Funzy/swipabledialogue.dart';
 import '../../models/user_channel.dart';
@@ -24,6 +25,7 @@ import '../../modals/FAB/comrade_list.dart';
 import '../../modals/Funzy/swipabledialogue.dart';
 import '../../modals/homepage/admin_dashboard.dart';
 import '../../modals/homepage/channel_creation.dart';
+import '../main.dart'; // ✅ for AppCache — single source of truth for channels
 
 class HomePageWeb extends StatefulWidget {
   const HomePageWeb({super.key});
@@ -109,8 +111,8 @@ class _HomePageWebState extends State<HomePageWeb> {
   void _subscribeToNotifications() {
     _notificationSubscription = NotificationService.notificationStream
         .listen(_handleIncomingNotification);
-    _badgeStreamSubscription = NotificationService.badgeStream
-        .listen(_handleBadgeUpdate);
+    _badgeStreamSubscription =
+        NotificationService.badgeStream.listen(_handleBadgeUpdate);
   }
 
   void _handleIncomingNotification(Map<String, dynamic> message) {
@@ -135,7 +137,6 @@ class _HomePageWebState extends State<HomePageWeb> {
 
       _savePendingJoinRequests();
 
-   
       return;
     }
 
@@ -155,7 +156,6 @@ class _HomePageWebState extends State<HomePageWeb> {
       _savePendingJoinRequests();
       _loadAllData();
 
-      //ToastHelper.showSuccess('✅ You joined "$channelName" 🎉', context: context);
       return;
     }
 
@@ -174,7 +174,6 @@ class _HomePageWebState extends State<HomePageWeb> {
 
       _savePendingJoinRequests();
 
-   
       return;
     }
 
@@ -209,8 +208,7 @@ class _HomePageWebState extends State<HomePageWeb> {
       if (channelId.isNotEmpty) {
         setState(() {
           _pendingJoinRequests.remove(channelId);
-          _pendingJoinCount =
-              _pendingJoinCount > 0 ? _pendingJoinCount - 1 : 0;
+          _pendingJoinCount = _pendingJoinCount > 0 ? _pendingJoinCount - 1 : 0;
           _notificationCount =
               _notificationCount > 0 ? _notificationCount - 1 : 0;
         });
@@ -310,28 +308,74 @@ class _HomePageWebState extends State<HomePageWeb> {
     if (total > 99) return '99+';
     return total.toString();
   }
-
-  void _onNotificationsViewed() {
+void _onNotificationsViewed() {
     if (_pendingJoinCount > 0) {
       _showPendingRequestsModal();
       return;
     }
 
-    setState(() {
-      for (var notification in _notifications) {
-        notification['isUnread'] = false;
-      }
-      _notificationCount = 0;
-      _hasUnreadNotifications = false;
-    });
-    _saveNotifications();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => NotificationsListModal(
+        notifications: _notifications,
+        onMarkAllRead: () {
+          if (!mounted) return;
+          setState(() {
+            for (var notification in _notifications) {
+              notification['isUnread'] = false;
+            }
+            _notificationCount = 0;
+            _hasUnreadNotifications = false;
+          });
+          _saveNotifications();
+        },
+        onClearAll: () {
+          if (!mounted) return;
+          setState(() {
+            _notifications.clear();
+            _notificationCount = 0;
+            _hasUnreadNotifications = false;
+          });
+          _saveNotifications();
+        },
+        onNotificationTap: (tapped) {
+          Navigator.pop(context); // close the modal first
+          _routeNotificationTap(tapped);
+        },
+      ),
+    );
   }
+
+  /// Optional routing — sends the user somewhere useful depending on the
+  /// notification type. Safe to leave as a no-op stub for types you don't
+  /// want to route yet; extend as needed.
+  void _routeNotificationTap(Map<String, dynamic> tapped) {
+    final type = tapped['type']?.toString() ?? '';
+    final data = tapped['data'] is Map
+        ? Map<String, dynamic>.from(tapped['data'])
+        : <String, dynamic>{};
+
+    switch (type) {
+      case 'comrade_added':
+        _showComradesModal();
+        break;
+      case 'channel_invite':
+      case 'join_link':
+        // channel_id available in `data['channel_id']` if you want to
+        // navigate straight into that channel's chat.
+        break;
+      default:
+        break;
+    }
+  }
+  
 
   void _showPendingRequestsModal() {
     if (_isModalOpen || !mounted) return;
 
     if (_pendingJoinCount == 0) {
-      //ToastHelper.showWarning('No pending join requests', context: context);
       return;
     }
 
@@ -499,9 +543,7 @@ class _HomePageWebState extends State<HomePageWeb> {
             Icon(
               icon,
               size: 18,
-              color: isDestructive
-                  ? FanColors.away
-                  : FanColors.textPrimary,
+              color: isDestructive ? FanColors.away : FanColors.textPrimary,
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -510,9 +552,7 @@ class _HomePageWebState extends State<HomePageWeb> {
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w500,
-                  color: isDestructive
-                      ? FanColors.away
-                      : FanColors.textPrimary,
+                  color: isDestructive ? FanColors.away : FanColors.textPrimary,
                 ),
               ),
             ),
@@ -525,30 +565,29 @@ class _HomePageWebState extends State<HomePageWeb> {
   // ==========================================================================
   // MODAL SHOW METHODS - FULL IMPLEMENTATION
   // ==========================================================================
-void _showMyProfile() {
-  if (!_isLoggedIn) {
-    _showLoginModal();
-    return;
-  }
+  void _showMyProfile() {
+    if (!_isLoggedIn) {
+      _showLoginModal();
+      return;
+    }
 
-  // ✅ Use SwipeableProfileModal - this is the modal version
-  showModalBottomSheet(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    builder: (context) => SwipeableProfileModal(
-      apiBaseUrl: API_BASE_URL.replaceAll('/api', ''),
-      userId: _authService.userId ?? '',
-      username: _authService.username ?? '',
-      phone: _authService.phone ?? '',
-      userChannels: _userChannels,
-      onUserUpdated: (userData) {
-        setState(() {});
-      },
-      onLogout: _handleLogout,
-    ),
-  );
-}
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => SwipeableProfileModal(
+        apiBaseUrl: API_BASE_URL.replaceAll('/api', ''),
+        userId: _authService.userId ?? '',
+        username: _authService.username ?? '',
+        phone: _authService.phone ?? '',
+        userChannels: _userChannels,
+        onUserUpdated: (userData) {
+          setState(() {});
+        },
+        onLogout: _handleLogout,
+      ),
+    );
+  }
 
   void _showComradesModal() {
     if (!_isLoggedIn) {
@@ -556,10 +595,7 @@ void _showMyProfile() {
       return;
     }
 
-    // Get comrades list
     final Set<String> comradesList = {};
-    // You can fetch from AppCache or service
-    // For now, use a placeholder
 
     showModalBottomSheet(
       context: context,
@@ -608,8 +644,6 @@ void _showMyProfile() {
 
     // Block channel creation once user already belongs to 3 groups
     if (_userChannels.length >= MAX_CHANNELS) {
-     
-      
       return;
     }
 
@@ -662,15 +696,23 @@ void _showMyProfile() {
   // ==========================================================================
   // DATA LOADING METHODS
   // ==========================================================================
+  //
+  // ✅ REWRITTEN to mirror mobile's home_page.dart pattern exactly:
+  //   - Cache shown instantly (AppCache.channels) when available.
+  //   - Real revalidation always goes through AppCache.refreshChannels,
+  //     never a raw http.get to /channels/user/$userId.
+  //   - Browsable-channel rules (MAX_CHANNELS / TARGET_DISPLAY_COUNT) are
+  //     applied in one shared place (_applyJoinedChannels) so cache and
+  //     network paths can't drift apart.
+  // ==========================================================================
 
   Future<void> _loadAllData() async {
-    setState(() => _isLoading = true);
-
     print('🔄 _loadAllData: Starting...');
     print('   isLoggedIn: $_isLoggedIn');
 
     try {
       if (!_isLoggedIn) {
+        setState(() => _isLoading = true);
         final browsable = await _fetchBrowsableChannels(
           excludeIds: const {},
           limit: TARGET_DISPLAY_COUNT,
@@ -682,41 +724,23 @@ void _showMyProfile() {
           _selectedChannelId = null;
           _selectedChannel = 'All Channels';
         });
-      } else {
-        final userId = _authService.userId ?? '';
-        final joined = await _fetchUserChannelsFromApi(userId);
-
-        if (joined.length >= MAX_CHANNELS) {
-          setState(() {
-            _userChannels = joined.take(MAX_CHANNELS).toList();
-            _allChannels = joined.take(MAX_CHANNELS).toList();
-            _isFull = true;
-          });
-        } else {
-          final joinedIds = joined.map((c) => c.channelId).toSet();
-          final needed = TARGET_DISPLAY_COUNT - joined.length;
-          final browsable = await _fetchBrowsableChannels(
-            excludeIds: joinedIds,
-            limit: needed,
-          );
-          setState(() {
-            _userChannels = joined;
-            _allChannels = [...joined, ...browsable];
-            _isFull = false;
-          });
-        }
-
-        // If no channel is selected, select the first one
-        if (_selectedChannelId == null && _userChannels.isNotEmpty) {
-          _selectedChannelId = _userChannels.first.channelId;
-          _selectedChannel = _userChannels.first.name;
-        }
+        return;
       }
 
-      if (_allChannels.isNotEmpty && _selectedChannelId == null) {
-        _selectedChannelId = _allChannels.first.channelId;
-        _selectedChannel = _allChannels.first.name;
+      // ✅ Cache-first: show whatever AppCache already has instantly.
+      if (AppCache.channels.isNotEmpty) {
+        final cached = List<UserChannel>.from(AppCache.channels);
+        await _applyJoinedChannels(cached);
+        if (mounted) setState(() => _isLoading = false);
+
+        // Cache might be stale — always revalidate in the background.
+        await _refreshChannelsInBackground();
+        return;
       }
+
+      // No cache at all — go straight to network.
+      setState(() => _isLoading = true);
+      await _refreshChannelsInBackground();
     } catch (e) {
       print('❌ Error loading data: $e');
     } finally {
@@ -726,42 +750,72 @@ void _showMyProfile() {
     }
   }
 
+  /// ✅ Single source of truth for joined channels. Always goes through
+  /// AppCache.refreshChannels — this is what mobile's home_page.dart does
+  /// via its own _refreshChannelsInBackground(), and keeps web in sync
+  /// with whatever logic AppCache uses internally.
+  Future<void> _refreshChannelsInBackground() async {
+    final userId = _authService.userId ?? '';
+    if (userId.isEmpty) return;
+
+    await AppCache.refreshChannels(userId, _authService.authToken);
+
+    if (!mounted) return;
+
+    final joined = List<UserChannel>.from(AppCache.channels);
+    print('✅ Loaded ${joined.length} user channels (via AppCache)');
+
+    await _applyJoinedChannels(joined);
+
+    if (mounted) setState(() => _isLoading = false);
+  }
+
+  /// Shared logic for applying the MAX_CHANNELS / browsable-fill rules
+  /// once we have a joined-channels list, whether it came from cache or
+  /// a fresh AppCache.refreshChannels() call.
+  Future<void> _applyJoinedChannels(List<UserChannel> joined) async {
+    if (joined.length >= MAX_CHANNELS) {
+      setState(() {
+        _userChannels = joined.take(MAX_CHANNELS).toList();
+        _allChannels = joined.take(MAX_CHANNELS).toList();
+        _isFull = true;
+      });
+    } else {
+      final joinedIds = joined.map((c) => c.channelId).toSet();
+      final needed = TARGET_DISPLAY_COUNT - joined.length;
+      final browsable = await _fetchBrowsableChannels(
+        excludeIds: joinedIds,
+        limit: needed,
+      );
+      setState(() {
+        _userChannels = joined;
+        _allChannels = [...joined, ...browsable];
+        _isFull = false;
+      });
+    }
+
+    // If no channel is selected yet, select the first one.
+    if (_selectedChannelId == null && _userChannels.isNotEmpty) {
+      _selectedChannelId = _userChannels.first.channelId;
+      _selectedChannel = _userChannels.first.name;
+    }
+    if (_allChannels.isNotEmpty && _selectedChannelId == null) {
+      _selectedChannelId = _allChannels.first.channelId;
+      _selectedChannel = _allChannels.first.name;
+    }
+  }
+
   // ==========================================================================
   // API METHODS
   // ==========================================================================
-
-  Future<List<UserChannel>> _fetchUserChannelsFromApi(String userId) async {
-    print('🌐 _fetchUserChannelsFromApi: userId: $userId');
-    if (userId.isEmpty) return [];
-
-    try {
-      final headers = {'Content-Type': 'application/json'};
-      final token = _authService.authToken;
-      if (token != null && token.isNotEmpty) {
-        headers['Authorization'] = 'Bearer $token';
-      }
-
-      final response = await http
-          .get(Uri.parse('$API_BASE_URL/channels/user/$userId'),
-              headers: headers)
-          .timeout(const Duration(seconds: 10));
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final List<dynamic> channelsData = data['channels'] ?? [];
-        final result = channelsData
-            .map((c) => UserChannel.fromJson(c as Map<String, dynamic>))
-            .toList();
-        print('✅ Loaded ${result.length} user channels');
-        return result;
-      }
-
-      print('❌ _fetchUserChannelsFromApi failed: ${response.statusCode}');
-    } catch (e) {
-      print('❌ _fetchUserChannelsFromApi error: $e');
-    }
-    return [];
-  }
+  //
+  // ⚠️ NOTE: _fetchUserChannelsFromApi has been REMOVED. It used to call
+  // GET /channels/user/$userId directly, bypassing AppCache entirely, which
+  // is what caused web to show only 1 joined channel while mobile (which
+  // always reads through AppCache.channels) showed the correct count.
+  // All joined-channel reads now go through AppCache — see
+  // _refreshChannelsInBackground() above.
+  // ==========================================================================
 
   Future<List<UserChannel>> _fetchBrowsableChannels({
     required Set<String> excludeIds,
@@ -796,7 +850,12 @@ void _showMyProfile() {
     } catch (e) {
       print('❌ _fetchBrowsableChannels error: $e');
     }
-    return [];
+
+    // Fallback: best-effort from AppCache, still excluding joined ones.
+    return AppCache.channels
+        .where((c) => !excludeIds.contains(c.channelId))
+        .take(limit)
+        .toList();
   }
 
   Future<bool> _joinChannelApi(String userId, String channelId) async {
@@ -844,7 +903,10 @@ void _showMyProfile() {
       );
 
       if (success && mounted) {
-        await _loadAllData();
+        // ✅ Revalidate through AppCache instead of a full _loadAllData(),
+        // which used to just re-read the same stale source. This mirrors
+        // mobile's _joinChannelDirectly -> _refreshChannelsInBackground.
+        await _refreshChannelsInBackground();
         _loadPendingJoinRequests();
       }
     } catch (e) {
@@ -891,9 +953,8 @@ void _showMyProfile() {
       });
       _saveNotifications();
       _savePendingJoinRequests();
-     // ToastHelper.showSuccess('Logged out successfully', context: context);
     } catch (e) {
-      //ToastHelper.showError('Logout failed', context: context);
+      // Logout failed
     } finally {
       _isLoggingOut = false;
     }
@@ -961,7 +1022,7 @@ void _showMyProfile() {
   // SHOW LOGIN MODAL
   // ==========================================================================
 
- void _showLoginModal() {
+  void _showLoginModal() {
     if (_isModalOpen) return;
     _isModalOpen = true;
 
@@ -970,7 +1031,6 @@ void _showMyProfile() {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => LoginModal(
-        // ✅ Remove messengerKey - it's not needed in web
         onLoginSuccess: (userId, username) async {
           if (mounted) {
             _isModalOpen = false;
@@ -1200,12 +1260,10 @@ class _PendingRequestsModalState extends State<PendingRequestsModal> {
           }
         });
 
-       // ToastHelper.showSuccess('✅ $username approved!', context: context);
-
         widget.onRequestProcessed();
       }
     } catch (e) {
-//ToastHelper.showError('Failed to approve request', context: context);
+      // Approve failed
     } finally {
       if (mounted) {
         setState(() {
@@ -1251,12 +1309,10 @@ class _PendingRequestsModalState extends State<PendingRequestsModal> {
           }
         });
 
-       // ToastHelper.showWarning('❌ Request from $username declined', context: context);
-
         widget.onRequestProcessed();
       }
     } catch (e) {
-     // ToastHelper.showError('Failed to reject request', context: context);
+      // Reject failed
     } finally {
       if (mounted) {
         setState(() {

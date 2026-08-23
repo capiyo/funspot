@@ -1408,6 +1408,84 @@ class _WebProfilePanelState extends State<WebProfilePanel>
   }
 
   // ==========================================================================
+  // CHANNELS SECTION (header + tab bar + tab view, all rendered together)
+  // ==========================================================================
+
+  Widget _buildChannelsSection() {
+    final channelCount = _userChannels.length.clamp(0, 3);
+
+    if (channelCount == 0) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 6),
+        const Divider(height: 1),
+        const SizedBox(height: 4),
+        Container(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Row(
+            children: [
+              Icon(
+                Icons.people_alt_outlined,
+                size: 14,
+                color: FanColors.primary,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'Channels',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: FanColors.textPrimary,
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  color: FanColors.primary.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '${_userChannels.length}',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: FanColors.primary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 2),
+
+        // Tab bar sits directly under the "Channels" header now — no gap.
+        _buildChannelTabBar(),
+        const SizedBox(height: 2),
+
+        // Fixed-height tab view so it can live inside the outer scroll view.
+        // Horizontal swipe between tabs still works; vertical drag physics
+        // are disabled here so it doesn't fight the outer scroll gesture.
+        SizedBox(
+          height: 180,
+          child: TabBarView(
+            controller: _tabController,
+            physics: const NeverScrollableScrollPhysics(),
+            children: List.generate(
+              channelCount,
+              (index) => _buildChannelFragment(index),
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+      ],
+    );
+  }
+
+  // ==========================================================================
   // MAIN BUILD
   // ==========================================================================
 
@@ -1473,8 +1551,6 @@ class _WebProfilePanelState extends State<WebProfilePanel>
         ),
       );
     }
-
-    final channelCount = _userChannels.length.clamp(0, 3);
 
     return Container(
       width: 240,
@@ -1551,7 +1627,9 @@ class _WebProfilePanelState extends State<WebProfilePanel>
           ),
           const Divider(height: 1),
 
-          // Scrollable Content
+          // Everything below lives in ONE scrollable region now, so the
+          // Channels section sits immediately after the profile content
+          // instead of being pushed down by leftover Expanded space.
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -1575,73 +1653,12 @@ class _WebProfilePanelState extends State<WebProfilePanel>
                     _buildNoProfileView(),
                   ],
 
-                  // ✅ Channels Section - small margin
-                  if (_userData != null && channelCount > 0) ...[
-                    const SizedBox(height: 6),
-                    const Divider(height: 1),
-                    const SizedBox(height: 4),
-                    Container(
-                      padding: const EdgeInsets.symmetric(vertical: 2),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.people_alt_outlined,
-                            size: 14,
-                            color: FanColors.primary,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            'Channels',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: FanColors.textPrimary,
-                            ),
-                          ),
-                          const Spacer(),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 1),
-                            decoration: BoxDecoration(
-                              color: FanColors.primary.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Text(
-                              '${_userChannels.length}',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600,
-                                color: FanColors.primary,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                  ],
+                  // Channels section (header + tab bar + tab view together)
+                  if (_userData != null) _buildChannelsSection(),
                 ],
               ),
             ),
           ),
-
-          // Channel Tab Bar (fixed at bottom) - Swipeable
-          if (!_isLoading && !_isCheckingVisibility && channelCount > 0) ...[
-            _buildChannelTabBar(),
-            const SizedBox(height: 2),
-            SizedBox(
-              height: 180,
-              child: TabBarView(
-                controller: _tabController,
-                physics: const BouncingScrollPhysics(),
-                children: List.generate(
-                  channelCount,
-                  (index) => _buildChannelFragment(index),
-                ),
-              ),
-            ),
-            const SizedBox(height: 4),
-          ],
         ],
       ),
     );

@@ -7,6 +7,8 @@ import '../pages/fixture_page.dart';
 import 'package:flutter/foundation.dart' show kDebugMode, compute;
 import '../modals/login_modal.dart';
 import '../modals/FAB/add_post_modal.dart';
+
+import '../modals/homepage/notifications_modal.dart';
 import '../models/fixture_models.dart' as models;
 import '../modals/FAB/profile_modal.dart';
 import '../models/user_channel.dart';
@@ -4709,24 +4711,68 @@ class _HomePageState extends State<HomePage>
     _bounceAnimationController.reset();
   }
 
-  void _onNotificationsViewed() {
+ void _onNotificationsViewed() {
     if (_pendingJoinCount > 0) {
       _showPendingRequestsModal();
       return;
     }
 
-    NotificationService.markAllNotificationsAsRead();
-    setState(() {
-      for (var notification in _notifications) {
-        notification['isUnread'] = false;
-      }
-      _notificationCount = 0;
-      _hasUnreadNotifications = false;
-      _stopPulsing();
-    });
-    _saveNotifications();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => NotificationsListModal(
+        notifications: _notifications,
+        onMarkAllRead: () {
+          if (!mounted) return;
+          setState(() {
+            for (var notification in _notifications) {
+              notification['isUnread'] = false;
+            }
+            _notificationCount = 0;
+            _hasUnreadNotifications = false;
+          });
+          _saveNotifications();
+        },
+        onClearAll: () {
+          if (!mounted) return;
+          setState(() {
+            _notifications.clear();
+            _notificationCount = 0;
+            _hasUnreadNotifications = false;
+          });
+          _saveNotifications();
+        },
+        onNotificationTap: (tapped) {
+          Navigator.pop(context); // close the modal first
+          _routeNotificationTap(tapped);
+        },
+      ),
+    );
   }
 
+  /// Optional routing — sends the user somewhere useful depending on the
+  /// notification type. Safe to leave as a no-op stub for types you don't
+  /// want to route yet; extend as needed.
+  void _routeNotificationTap(Map<String, dynamic> tapped) {
+    final type = tapped['type']?.toString() ?? '';
+    final data = tapped['data'] is Map
+        ? Map<String, dynamic>.from(tapped['data'])
+        : <String, dynamic>{};
+
+    switch (type) {
+      case 'comrade_added':
+        _showComradesModal();
+        break;
+      case 'channel_invite':
+      case 'join_link':
+        // channel_id available in `data['channel_id']` if you want to
+        // navigate straight into that channel's chat.
+        break;
+      default:
+        break;
+    }
+  }
   Future<void> _syncPendingRequestsFromBackend() async {
     if (!_isLoggedIn || _authToken == null) return;
 

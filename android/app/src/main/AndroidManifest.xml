@@ -10,9 +10,9 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <application
-        android:label="Funtasy"
+        android:label="Funspot"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"> 
 
         <activity
             android:name=".MainActivity"
