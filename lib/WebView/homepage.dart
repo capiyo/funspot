@@ -13,7 +13,7 @@ import '../pages/fixture_page.dart';
 import "../pages/posts_page.dart";
 import '../modals/homepage/notifications_modal.dart';
 import '../pages/logs.dart';
-import '../../modals/Funzy/swipabledialogue.dart';
+import '../modals/Funzy/leaderboard.dart';
 import '../../models/user_channel.dart';
 import '../../services/auth_service.dart';
 import '../../services/toast_helper.dart';
@@ -300,6 +300,50 @@ class _HomePageWebState extends State<HomePageWeb> {
     } catch (e) {
       debugPrint('Failed to save pending join requests: $e');
     }
+  }
+
+  // ==========================================================================
+// HANDLE OPEN LEADERBOARD — mirrors mobile home_page.dart's
+// _showChannelLeaderboard exactly (opens ComradeModal, selects channel first)
+// ==========================================================================
+  void _handleOpenLeaderboard(UserChannel channel) {
+    print('🏆 Leaderboard tap on channel: ${channel.name}');
+
+    if (!_isLoggedIn) {
+      _showLoginModal();
+      return;
+    }
+
+    // Select the channel first, same as mobile.
+    _handleChannelSelected(channel);
+
+    if (_isModalOpen) return;
+    _isModalOpen = true;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => ComradeModal(
+        isOpen: true,
+        onClose: () {
+          Navigator.pop(context);
+          _isModalOpen = false;
+        },
+        currentUserId: _authService.userId ?? '',
+        currentUserName: _authService.username ?? '',
+        authToken: _authService.authToken,
+        channelId: channel.channelId,
+        channelName: channel.name,
+        fixture: null,
+        comradesList: const <String>{},
+        comradesVoteMap: const {},
+        hasUserVoted: false,
+        userVoteSelection: null,
+      ),
+    ).then((_) {
+      _isModalOpen = false;
+    });
   }
 
   String _getBadgeDisplayCount() {
@@ -1085,6 +1129,7 @@ void _onNotificationsViewed() {
             onJoinChannel: _handleJoinChannel,
             onCreateChannel: _handleCreateChannel,
             onOpenChat: _handleOpenChat,
+            onOpenLeaderboard: _handleOpenLeaderboard,
             onMenuTap: _showMenu,
             onNotificationTap: _onNotificationsViewed,
             notificationCount: _notificationCount + _pendingJoinCount,

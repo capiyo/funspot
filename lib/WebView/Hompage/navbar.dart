@@ -267,12 +267,20 @@ class WebNavbar extends StatelessWidget {
               width: 1,
             ),
           ),
-          child: const CircleAvatar(
-            backgroundColor: Color(0xFF0B3D2E),
-            child: Icon(
-              Icons.sports_soccer,
-              color: Color(0xFF34D399),
-              size: 18, // was 24
+          child: ClipOval(
+            child: Container(
+              color: const Color(0xFF0B3D2E),
+              padding: const EdgeInsets.all(
+                  5), // small inset so the mark doesn't touch the ring
+              child: Image.asset(
+                'assets/icons/funspot.png',
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) => const Icon(
+                  Icons.sports_soccer,
+                  color: Color(0xFF34D399),
+                  size: 18,
+                ),
+              ),
             ),
           ),
         ),
@@ -325,7 +333,8 @@ class WebNavbar extends StatelessWidget {
   // ==========================================================================
   Widget _buildProfileInfo() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5), // was 14/8
+      padding:
+          const EdgeInsets.symmetric(horizontal: 12, vertical: 5), // was 14/8
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(10),
@@ -450,7 +459,8 @@ class WebNavbar extends StatelessWidget {
     final leader = sortedMembers.isNotEmpty ? sortedMembers.first : null;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2), // was 4/4
+      padding:
+          const EdgeInsets.symmetric(horizontal: 2, vertical: 2), // was 4/4
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -568,7 +578,8 @@ class WebNavbar extends StatelessWidget {
     return _WebTappable(
       onTap: onNotificationTap,
       borderRadius: BorderRadius.circular(18),
-      padding: const EdgeInsets.all(4), // was 6, bigger hit area than the bare icon
+      padding:
+          const EdgeInsets.all(4), // was 6, bigger hit area than the bare icon
       child: Stack(
         clipBehavior: Clip.none,
         children: [
@@ -820,7 +831,8 @@ class _CarouselEntry extends StatelessWidget {
     // inked via _WebTappable so clicks/hover still register on web.
     return _WebTappable(
       onTap: onTap,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6), // was 10/8
+      padding:
+          const EdgeInsets.symmetric(horizontal: 8, vertical: 6), // was 10/8
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
