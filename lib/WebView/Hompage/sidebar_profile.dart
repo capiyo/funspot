@@ -227,15 +227,62 @@ WebUserData _mockUserData() => WebUserData(
 List<_MockMember> _generateMockMembers(int count, String channelPrefix) {
   final List<_MockMember> members = [];
   final firstNames = [
-    'Kip', 'Brenda', 'The', 'Ngugi', 'Faith', 'Samuel', 'Wanjiru', 'Derek',
-    'Coach', 'Zawadi', 'Amos', 'Grace', 'Peter', 'Mary', 'John', 'Esther',
-    'David', 'Sarah', 'James', 'Ruth', 'Michael', 'Rachel', 'Joseph', 'Hannah',
-    'Daniel', 'Rebekah', 'Joshua', 'Deborah', 'Nathan', 'Miriam'
+    'Kip',
+    'Brenda',
+    'The',
+    'Ngugi',
+    'Faith',
+    'Samuel',
+    'Wanjiru',
+    'Derek',
+    'Coach',
+    'Zawadi',
+    'Amos',
+    'Grace',
+    'Peter',
+    'Mary',
+    'John',
+    'Esther',
+    'David',
+    'Sarah',
+    'James',
+    'Ruth',
+    'Michael',
+    'Rachel',
+    'Joseph',
+    'Hannah',
+    'Daniel',
+    'Rebekah',
+    'Joshua',
+    'Deborah',
+    'Nathan',
+    'Miriam'
   ];
   final lastNames = [
-    'Ochieng', 'W', 'Gooner', 'J', 'M', 'K', 'A', 'O',
-    'Otieno', 'N', 'Kimani', 'Njoroge', 'Kamau', 'Mwangi', 'Odhiambo', 'Akinyi',
-    'Omondi', 'Achieng', 'Ouma', 'Awino', 'Otieno', 'Adhiambo', 'Ochieng', 'Atieno'
+    'Ochieng',
+    'W',
+    'Gooner',
+    'J',
+    'M',
+    'K',
+    'A',
+    'O',
+    'Otieno',
+    'N',
+    'Kimani',
+    'Njoroge',
+    'Kamau',
+    'Mwangi',
+    'Odhiambo',
+    'Akinyi',
+    'Omondi',
+    'Achieng',
+    'Ouma',
+    'Awino',
+    'Otieno',
+    'Adhiambo',
+    'Ochieng',
+    'Atieno'
   ];
 
   for (int i = 0; i < count; i++) {
@@ -1764,7 +1811,7 @@ class _WebProfilePanelState extends State<WebProfilePanel>
   }
 
   // ==========================================================================
-  // MAIN BUILD
+  // MAIN BUILD - FIXED TO PROPERLY FILL AVAILABLE SPACE
   // ==========================================================================
 
   @override
@@ -1773,7 +1820,7 @@ class _WebProfilePanelState extends State<WebProfilePanel>
     // fires for a real, in-flight fetch.
     if (_isLoading || _isCheckingVisibility || _isChannelsLoading) {
       return Container(
-        width: 240,
+        width: 280,
         decoration: BoxDecoration(
           color: FanColors.surfaceElevated,
           border: Border(
@@ -1790,7 +1837,7 @@ class _WebProfilePanelState extends State<WebProfilePanel>
     }
 
     return Container(
-      width: 240,
+      width: 280,
       decoration: BoxDecoration(
         color: FanColors.surfaceElevated,
         boxShadow: [
@@ -1807,9 +1854,13 @@ class _WebProfilePanelState extends State<WebProfilePanel>
           ),
         ),
       ),
+      // ✅ FIX: Use Column with MainAxisSize.max and Expanded children
+      // to properly fill the available height
       child: Column(
+        mainAxisSize: MainAxisSize.max,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Header
+          // Header - fixed height
           Container(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
             child: Row(
@@ -1872,11 +1923,13 @@ class _WebProfilePanelState extends State<WebProfilePanel>
           // has a bounded height to grow into.
           Expanded(
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Flexible(
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
                     child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         // Balance card - only for current user
                         if (_isCurrentUser &&
@@ -1895,6 +1948,8 @@ class _WebProfilePanelState extends State<WebProfilePanel>
                         ] else ...[
                           _buildNoProfileView(),
                         ],
+                        // Add a small bottom padding to prevent content from being cut off
+                        const SizedBox(height: 8),
                       ],
                     ),
                   ),
