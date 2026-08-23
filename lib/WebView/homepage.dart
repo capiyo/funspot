@@ -9,7 +9,7 @@ import '../pages/fan_Funzy_design.dart';
 import '../WebView/Hompage/navbar.dart';
 import '../WebView/Hompage/sidebar_profile.dart';
 import '../WebView/Hompage/main_content_tabs.dart';
-import '../pages/fixture_page.dart';
+import '../pages/fixture_page.dart' hide ToastHelper;
 import "../pages/posts_page.dart";
 import '../modals/homepage/notifications_modal.dart';
 import '../pages/logs.dart';
@@ -902,75 +902,88 @@ class _HomePageWebState extends State<HomePageWeb> {
         .toList();
   }
 
-  Future<bool> _joinChannelApi(String userId, String channelId) async {
-    print('🌐 _joinChannelApi: userId: $userId, channelId: $channelId');
-    try {
-      final headers = {'Content-Type': 'application/json'};
-      final token = _authService.authToken;
-      if (token != null && token.isNotEmpty) {
-        headers['Authorization'] = 'Bearer $token';
-      }
-
-      final response = await http
-          .post(
-            Uri.parse('$API_BASE_URL/channels/members/add'),
-            headers: headers,
-            body: json.encode({
-              'channel_id': channelId,
-              'user_id': userId,
-              'username': _authService.username ?? '',
-            }),
-          )
-          .timeout(const Duration(seconds: 10));
-
-      return response.statusCode == 200;
-    } catch (e) {
-      print('❌ _joinChannelApi error: $e');
-      return false;
+ Future<bool> _joinChannelApi(String userId, String channelId) async {
+  print('🌐 _joinChannelApi: userId: $userId, channelId: $channelId');
+  try {
+    final headers = {'Content-Type': 'application/json'};
+    final token = _authService.authToken;
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
     }
-  }
 
+    final response = await http
+        .post(
+          Uri.parse('$API_BASE_URL/channels/members/add'),
+          headers: headers,
+          body: json.encode({
+            'channel_id': channelId,
+            'members': [
+              {'user_id': userId, 'username': _authService.username ?? ''},
+            ],
+          }),
+        )
+        .timeout(const Duration(seconds: 10));
+
+    return response.statusCode == 200 || response.statusCode == 201;
+  } catch (e) {
+    print('❌ _joinChannelApi error: $e');
+    return false;
+  }
+}
   // ==========================================================================
   // EVENT HANDLERS
   // ==========================================================================
 
   Future<void> _handleJoinChannel(UserChannel channel) async {
-    print('🔗 _handleJoinChannel: ${channel.name}');
+  print('🔗 _handleJoinChannel: ${channel.name}');
 
-    // Check if user is logged in before attempting to join
-    if (!_isLoggedIn) {
-      _showLoginModal();
-      return;
-    }
-
-    setState(() {
-      _joiningChannelIds.add(channel.channelId);
-    });
-
-    try {
-      final success = await _joinChannelApi(
-        _authService.userId ?? '',
-        channel.channelId,
-      );
-
-      if (success && mounted) {
-        // ✅ Revalidate through AppCache instead of a full _loadAllData(),
-        // which used to just re-read the same stale source. This mirrors
-        // mobile's _joinChannelDirectly -> _refreshChannelsInBackground.
-        await _refreshChannelsInBackground();
-        _loadPendingJoinRequests();
-      }
-    } catch (e) {
-      print('❌ Join channel error: $e');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _joiningChannelIds.remove(channel.channelId);
-        });
-      }
-    }
+  if (!_isLoggedIn) {
+    _showLoginModal();
+    return;
   }
 
+  // ✅ Don't join a channel that already has a pending request.
+  if (_pendingJoinRequests.contains(channel.channelId)) {
+    return;
+  }
+
+  // ✅ Double-tap guard — mirrors mobile's _joinChannelDirectly.
+  if (_joiningChannelIds.contains(channel.channelId)) {
+    return;
+  }
+
+  setState(() {
+    _joiningChannelIds.add(channel.channelId);
+  });
+
+  try {
+    final success = await _joinChannelApi(
+      _authService.userId ?? '',
+      channel.channelId,
+    );
+
+    if (success && mounted) {
+      // ✅ Revalidate through AppCache instead of a full _loadAllData(),
+      // which used to just re-read the same stale source. This mirrors
+      // mobile's _joinChannelDirectly -> _refreshChannelsInBackground.
+      await _refreshChannelsInBackground();
+      _loadPendingJoinRequests();
+    } else if (mounted) {
+      //ToastHelper.showError('Failed to join channel', context: context);
+    }
+  } catch (e) {
+    print('❌ Join channel error: $e');
+    if (mounted) {
+      //ToastHelper.showError('Error: $e', context: context);
+    }
+  } finally {
+    if (mounted) {
+      setState(() {
+        _joiningChannelIds.remove(channel.channelId);
+      });
+    }
+  }
+}
   void _handleChannelSelected(UserChannel channel) {
     print('📌 _handleChannelSelected: ${channel.name}');
     setState(() {
@@ -1135,6 +1148,7 @@ class _HomePageWebState extends State<HomePageWeb> {
             onChannelSelected: _handleChannelSelected,
             onJoinChannel: _handleJoinChannel,
             onCreateChannel: _handleCreateChannel,
+            pendingChannelIds: _pendingJoinRequests,
             onOpenChat: _handleOpenChat,
             onOpenLeaderboard: _handleOpenLeaderboard,
             onMenuTap: _showMenu,

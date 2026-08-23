@@ -96,6 +96,7 @@ class WebNavbar extends StatelessWidget {
   final VoidCallback onMenuTap;
   final VoidCallback onNotificationTap;
   final int notificationCount;
+  final Set<String> pendingChannelIds;
 
   // Identity used to pick a deterministic avatar photo.
   final String? userId;
@@ -127,6 +128,7 @@ class WebNavbar extends StatelessWidget {
     required this.onCreateChannel,
     required this.onMenuTap,
     required this.onNotificationTap,
+    this.pendingChannelIds = const {},
     this.notificationCount = 0,
     this.userId,
     this.nickname,
