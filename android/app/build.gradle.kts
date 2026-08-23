@@ -26,6 +26,7 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
+        isCoreLibraryDesugaringEnabled = true 
     }
 
     kotlinOptions {
@@ -79,4 +80,5 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.8.2")
     implementation("com.google.android.gms:play-services-ads:23.6.0")
     implementation("androidx.multidex:multidex:2.0.1")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
