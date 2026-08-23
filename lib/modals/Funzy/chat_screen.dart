@@ -2236,7 +2236,7 @@ static const Duration _commentaryFetchCooldown = Duration(seconds: 20);
       userName: widget.username,
       videoBytes: videoBytes,
       videoName: video.name,
-      thumbnailBytes: thumbnailBytes,
+      thumbnailBytes: thumbnailBytes!,
       thumbnailName: thumbnailName,
       caption: caption.isNotEmpty ? caption : null,
       channelId: widget.channelId,
