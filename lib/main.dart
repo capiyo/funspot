@@ -6,8 +6,10 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:developer' as developer;
+import 'services/web_notification_service_web.dart';
 import 'dart:io' show Platform;
 import 'firebase_options.dart';
+import 'services/local_notification_service.dart';
 import 'dart:async';
 import 'dart:convert';
 import "screens/app_shell.dart";
@@ -3805,10 +3807,107 @@ Future<void> _showJoinChannelDialog(String inviteCode) async {
 // ============================================================================
 // FCM SETUP
 // ============================================================================
+
+
+Future<void> initializeFCMWeb() async {
+  try {
+    developer.log('🔔 Initializing FCM (web)…', name: 'Funzypp');
+
+    await WebNotificationService.requestPermission();
+
+    final settings = await FirebaseMessaging.instance.requestPermission();
+    if (settings.authorizationStatus != AuthorizationStatus.authorized) {
+      developer.log('⚠️ FCM permission denied (web)', name: 'Funzypp');
+      return;
+    }
+
+    // Web requires the VAPID key to get a token.
+    final token = await FirebaseMessaging.instance.getToken(
+      vapidKey: 'BIvcsdfnoQ07A2PAEiXvHfjLPOfyga-fiPB-JLJfdr7NbXxwWJMr6fNT-71RzUVP-WZcL76W_sN137Fs9wMhi90',
+    );
+
+    if (token != null) {
+      developer.log('📱 Web FCM Token acquired', name: 'Funzypp');
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('fcm_token', token);
+
+      if (authService.isLoggedIn && authService.userId != null) {
+        await NotificationService.registerToken(
+          userId: authService.userId!,
+          fcmToken: token,
+          platform: 'web',
+          authToken: authService.authToken,
+        );
+      }
+    }
+
+    FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {
+      SharedPreferences.getInstance().then((prefs) {
+        prefs.setString('fcm_token', newToken);
+      });
+      if (authService.isLoggedIn && authService.userId != null) {
+        NotificationService.registerToken(
+          userId: authService.userId!,
+          fcmToken: newToken,
+          platform: 'web',
+          authToken: authService.authToken,
+        );
+      }
+    });
+
+    // Foreground messages — tab is open and focused.
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      developer.log('🔔 Foreground FCM message (web)', name: 'Funzypp');
+      final payload = _buildPayload(message);
+
+      WebNotificationService.show(message);
+
+      if (payload['type'] == 'comrade_added') {
+        final username = message.data['username'] ?? 'Someone';
+        if (messengerKey.currentContext != null) {
+          ScaffoldMessenger.of(messengerKey.currentContext!).showSnackBar(
+            SnackBar(
+              content: Text('🎉 $username added you as a comrade!'),
+              backgroundColor: FanColors.primary,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      }
+      NotificationService.pushToStream(payload);
+    });
+
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      _handleNotificationClick(message.data);
+    });
+  } catch (e) {
+    developer.log('❌ FCM web initialization error: $e', name: 'Funzypp');
+  }
+}
+
+
+
+
+
+
+
+
+
+
 Future<void> initializeFCM() async {
   try {
     developer.log('🔔 Initializing FCM…', name: 'Funzypp');
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+    // ✅ Set up local notifications BEFORE we start listening for messages,
+    // so onMessage never fires before the plugin is ready to show anything.
+    await LocalNotificationService.initialize(
+      onTap: (payload) {
+        if (payload == null || payload.isEmpty) return;
+        _handleNotificationClick({'type': payload});
+      },
+    );
 
     final settings = await FirebaseMessaging.instance.requestPermission();
     if (settings.authorizationStatus != AuthorizationStatus.authorized) {
@@ -3862,6 +3961,10 @@ Future<void> initializeFCM() async {
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       developer.log('🔔 Foreground FCM message', name: 'Funzypp');
       final payload = _buildPayload(message);
+
+      // ✅ Show a real system-tray notification even while foregrounded —
+      // Firebase never does this automatically when the app is in front.
+      LocalNotificationService.show(message);
 
       if (payload['type'] == 'comrade_added') {
         final username = message.data['username'] ?? 'Someone';
@@ -3995,10 +4098,17 @@ Future<void> main() async {
 
   Future.delayed(const Duration(seconds: 3), () => AppCache.refreshAll());
 
+  // ✅ Platform-specific push init: web uses VAPID + service worker +
+  // browser Notification API; mobile uses FCM's native background handler
+  // + flutter_local_notifications for foreground display.
   unawaited(() async {
     try {
       await initializeDeepLinks();
-      if (!kIsWeb) await initializeFCM();
+      if (kIsWeb) {
+        await initializeFCMWeb();
+      } else {
+        await initializeFCM();
+      }
     } catch (e) {
       developer.log('❌ Post-launch init error: $e', name: 'Funzypp');
     }

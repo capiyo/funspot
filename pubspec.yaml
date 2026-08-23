@@ -46,6 +46,7 @@ dependencies:
   video_thumbnail: ^0.5.5
   image_picker: ^1.1.0
   cached_network_image: ^3.4.0
+  flutter_local_notifications: ^18.0.1
 
   # Utilities
   intl: ^0.20.3
