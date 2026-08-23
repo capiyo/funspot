@@ -352,7 +352,8 @@ class _HomePageWebState extends State<HomePageWeb> {
     if (total > 99) return '99+';
     return total.toString();
   }
-void _onNotificationsViewed() {
+
+  void _onNotificationsViewed() {
     if (_pendingJoinCount > 0) {
       _showPendingRequestsModal();
       return;
@@ -414,7 +415,6 @@ void _onNotificationsViewed() {
         break;
     }
   }
-  
 
   void _showPendingRequestsModal() {
     if (_isModalOpen || !mounted) return;
@@ -936,6 +936,13 @@ void _onNotificationsViewed() {
 
   Future<void> _handleJoinChannel(UserChannel channel) async {
     print('🔗 _handleJoinChannel: ${channel.name}');
+
+    // Check if user is logged in before attempting to join
+    if (!_isLoggedIn) {
+      _showLoginModal();
+      return;
+    }
+
     setState(() {
       _joiningChannelIds.add(channel.channelId);
     });
@@ -1137,6 +1144,8 @@ void _onNotificationsViewed() {
             nickname: null,
             teamName: null,
             country: null,
+            // ✅ Pass the login modal trigger to the navbar
+            onShowLoginModal: _showLoginModal,
           ),
           Expanded(
             child: Row(

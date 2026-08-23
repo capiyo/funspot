@@ -223,126 +223,63 @@ WebUserData _mockUserData() => WebUserData(
       balance: 0.0,
     );
 
+// Helper to generate mock members for a channel
+List<_MockMember> _generateMockMembers(int count, String channelPrefix) {
+  final List<_MockMember> members = [];
+  final firstNames = [
+    'Kip', 'Brenda', 'The', 'Ngugi', 'Faith', 'Samuel', 'Wanjiru', 'Derek',
+    'Coach', 'Zawadi', 'Amos', 'Grace', 'Peter', 'Mary', 'John', 'Esther',
+    'David', 'Sarah', 'James', 'Ruth', 'Michael', 'Rachel', 'Joseph', 'Hannah',
+    'Daniel', 'Rebekah', 'Joshua', 'Deborah', 'Nathan', 'Miriam'
+  ];
+  final lastNames = [
+    'Ochieng', 'W', 'Gooner', 'J', 'M', 'K', 'A', 'O',
+    'Otieno', 'N', 'Kimani', 'Njoroge', 'Kamau', 'Mwangi', 'Odhiambo', 'Akinyi',
+    'Omondi', 'Achieng', 'Ouma', 'Awino', 'Otieno', 'Adhiambo', 'Ochieng', 'Atieno'
+  ];
+
+  for (int i = 0; i < count; i++) {
+    final firstName = firstNames[i % firstNames.length];
+    final lastName = lastNames[(i * 3 + 7) % lastNames.length];
+    final username = '${firstName.toLowerCase()}_$lastName'.toLowerCase();
+    final correctVotes = 15 + (i * 3) % 40;
+    final totalVotes = correctVotes + (5 + i % 15);
+    final msgCount = 10 + (i * 7) % 150;
+    final seasonPoints = 200 + (i * 35) % 900;
+
+    members.add(_MockMember(
+      userId: 'm${i + 1}_${channelPrefix}',
+      username: username,
+      correctVotes: correctVotes,
+      totalVotes: totalVotes,
+      msgCount: msgCount,
+      seasonPoints: seasonPoints,
+    ));
+  }
+  return members;
+}
+
 List<ChannelLike> _mockChannels() => [
       _MockChannel(
         name: 'Premier League',
-        memberCount: 5,
+        memberCount: 15,
         season: '3',
         isAdmin: true,
-        members: const [
-          _MockMember(
-            userId: 'm1',
-            username: 'kip_ochieng',
-            correctVotes: 41,
-            totalVotes: 52,
-            msgCount: 118,
-            seasonPoints: 980,
-          ),
-          _MockMember(
-            userId: 'm2',
-            username: 'brenda_w',
-            correctVotes: 37,
-            totalVotes: 50,
-            msgCount: 96,
-            seasonPoints: 860,
-          ),
-          _MockMember(
-            userId: 'm3',
-            username: 'the_gooner',
-            correctVotes: 33,
-            totalVotes: 48,
-            msgCount: 74,
-            seasonPoints: 745,
-          ),
-          _MockMember(
-            userId: 'm4',
-            username: 'ngugi_j',
-            correctVotes: 29,
-            totalVotes: 45,
-            msgCount: 61,
-            seasonPoints: 640,
-          ),
-          _MockMember(
-            userId: 'm5',
-            username: 'faith_m',
-            correctVotes: 22,
-            totalVotes: 40,
-            msgCount: 39,
-            seasonPoints: 510,
-          ),
-        ],
+        members: _generateMockMembers(15, 'pl'),
       ),
       _MockChannel(
         name: 'World Cup Warriors',
-        memberCount: 4,
+        memberCount: 15,
         season: '1',
         isAdmin: false,
-        members: const [
-          _MockMember(
-            userId: 'm6',
-            username: 'samuel_k',
-            correctVotes: 19,
-            totalVotes: 25,
-            msgCount: 44,
-            seasonPoints: 420,
-          ),
-          _MockMember(
-            userId: 'm7',
-            username: 'guest_fan',
-            correctVotes: 15,
-            totalVotes: 22,
-            msgCount: 30,
-            seasonPoints: 360,
-          ),
-          _MockMember(
-            userId: 'm8',
-            username: 'wanjiru_a',
-            correctVotes: 14,
-            totalVotes: 21,
-            msgCount: 27,
-            seasonPoints: 330,
-          ),
-          _MockMember(
-            userId: 'm9',
-            username: 'derek_o',
-            correctVotes: 10,
-            totalVotes: 20,
-            msgCount: 12,
-            seasonPoints: 210,
-          ),
-        ],
+        members: _generateMockMembers(15, 'wc'),
       ),
       _MockChannel(
         name: 'Local Derby Crew',
-        memberCount: 3,
+        memberCount: 15,
         season: '2',
         isAdmin: false,
-        members: const [
-          _MockMember(
-            userId: 'm10',
-            username: 'coach_otieno',
-            correctVotes: 28,
-            totalVotes: 33,
-            msgCount: 152,
-            seasonPoints: 890,
-          ),
-          _MockMember(
-            userId: 'm11',
-            username: 'zawadi_n',
-            correctVotes: 20,
-            totalVotes: 30,
-            msgCount: 88,
-            seasonPoints: 610,
-          ),
-          _MockMember(
-            userId: 'm12',
-            username: 'guest_fan',
-            correctVotes: 16,
-            totalVotes: 28,
-            msgCount: 51,
-            seasonPoints: 470,
-          ),
-        ],
+        members: _generateMockMembers(15, 'ld'),
       ),
     ];
 

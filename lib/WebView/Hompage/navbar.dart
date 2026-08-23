@@ -110,6 +110,9 @@ class WebNavbar extends StatelessWidget {
   final ValueChanged<UserChannel>? onOpenChat;
   final ValueChanged<UserChannel>? onOpenLeaderboard;
 
+  // Callback to show login modal when unauthenticated user tries to join
+  final VoidCallback? onShowLoginModal;
+
   const WebNavbar({
     super.key,
     required this.isLoggedIn,
@@ -131,6 +134,7 @@ class WebNavbar extends StatelessWidget {
     this.country,
     this.onOpenChat,
     this.onOpenLeaderboard,
+    this.onShowLoginModal,
   });
 
   bool get _hasProfileInfo =>
@@ -219,8 +223,10 @@ class WebNavbar extends StatelessWidget {
               channels: allChannels,
               memberChannelIds: _memberChannelIds,
               joiningChannelIds: joiningChannelIds,
-              onJoinChannel: onJoinChannel,
+              isLoggedIn: isLoggedIn,
+              onJoinChannel: _handleJoinChannel,
               onChannelTap: onChannelSelected,
+              onShowLoginModal: onShowLoginModal,
             ),
           ),
 
@@ -249,6 +255,19 @@ class WebNavbar extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  // ==========================================================================
+  // HANDLE JOIN - Check login status first
+  // ==========================================================================
+  void _handleJoinChannel(UserChannel channel) {
+    if (!isLoggedIn) {
+      // Show login modal if user is not logged in
+      onShowLoginModal?.call();
+      return;
+    }
+    // Proceed with join if logged in
+    onJoinChannel(channel);
   }
 
   // ==========================================================================
@@ -694,15 +713,19 @@ class _ChannelCarousel extends StatefulWidget {
   final List<UserChannel> channels;
   final Set<String> memberChannelIds;
   final Set<String> joiningChannelIds;
+  final bool isLoggedIn;
   final ValueChanged<UserChannel> onJoinChannel;
   final ValueChanged<UserChannel> onChannelTap;
+  final VoidCallback? onShowLoginModal;
 
   const _ChannelCarousel({
     required this.channels,
     required this.memberChannelIds,
     required this.joiningChannelIds,
+    required this.isLoggedIn,
     required this.onJoinChannel,
     required this.onChannelTap,
+    this.onShowLoginModal,
   });
 
   @override
@@ -797,8 +820,10 @@ class _ChannelCarouselState extends State<_ChannelCarousel> {
             channel: channel,
             isMember: isMember,
             isJoining: isJoining,
+            isLoggedIn: widget.isLoggedIn,
             onJoin: () => widget.onJoinChannel(channel),
             onTap: () => widget.onChannelTap(channel),
+            onShowLoginModal: widget.onShowLoginModal,
           );
         },
       ),
@@ -810,15 +835,19 @@ class _CarouselEntry extends StatelessWidget {
   final UserChannel channel;
   final bool isMember;
   final bool isJoining;
+  final bool isLoggedIn;
   final VoidCallback onJoin;
   final VoidCallback onTap;
+  final VoidCallback? onShowLoginModal;
 
   const _CarouselEntry({
     required this.channel,
     required this.isMember,
     required this.isJoining,
+    required this.isLoggedIn,
     required this.onJoin,
     required this.onTap,
+    this.onShowLoginModal,
   });
 
   @override
@@ -860,7 +889,14 @@ class _CarouselEntry extends StatelessWidget {
           if (!isMember) ...[
             const SizedBox(width: 6),
             _WebTappable(
-              onTap: isJoining ? null : onJoin,
+              onTap: () {
+                // Check if user is logged in before allowing join
+                if (!isLoggedIn) {
+                  onShowLoginModal?.call();
+                  return;
+                }
+                onJoin();
+              },
               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
               child: isJoining
                   ? const SizedBox(
