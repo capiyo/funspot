@@ -29,6 +29,51 @@ class FunspotGradients {
   ];
 }
 
+/// ✅ Shared tappable wrapper used everywhere in this navbar.
+///
+/// Flutter Web can silently drop taps on a bare `GestureDetector` when it
+/// wraps non-opaque children (Row/Icon/Text with transparent backgrounds)
+/// inside horizontally-scrolling ancestors — the gesture arena resolves
+/// to the scroll view instead of the tap. Wrapping every interactive
+/// element in `Material` + `InkWell` (with `HitTestBehavior.opaque` via
+/// the `onTap` always being attached directly to `InkWell`, which uses
+/// its own opaque `_InkResponseState` hit test) fixes this reliably, and
+/// also gives free hover/click cursor + ripple feedback on web/desktop.
+class _WebTappable extends StatelessWidget {
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
+  final Widget child;
+  final BorderRadius? borderRadius;
+  final EdgeInsetsGeometry padding;
+
+  const _WebTappable({
+    required this.onTap,
+    this.onLongPress,
+    required this.child,
+    this.borderRadius,
+    this.padding = EdgeInsets.zero,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        borderRadius: borderRadius ?? BorderRadius.circular(8),
+        mouseCursor: onTap == null
+            ? SystemMouseCursors.basic
+            : SystemMouseCursors.click,
+        child: Padding(
+          padding: padding,
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
 class WebNavbar extends StatelessWidget {
   final bool isLoggedIn;
   final List<UserChannel> userChannels;
@@ -331,6 +376,10 @@ class WebNavbar extends StatelessWidget {
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
+      // ✅ 'clamping' avoids the bouncing-scroll physics grabbing short
+      // horizontal drags before a tap can resolve — common cause of
+      // "taps only work after a few tries" on web trackpads/mice.
+      physics: const ClampingScrollPhysics(),
       child: Row(
         children: [
           ...displayChannels.map((c) => Padding(
@@ -346,41 +395,40 @@ class WebNavbar extends StatelessWidget {
   Widget _buildJoinChip(BuildContext context, UserChannel channel) {
     final bool isJoining = joiningChannelIds.contains(channel.channelId);
 
-    return GestureDetector(
-      onTap: () => onJoinChannel(channel),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              channel.name,
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: Colors.white,
-              ),
+    return _WebTappable(
+      onTap: isJoining ? null : () => onJoinChannel(channel),
+      borderRadius: BorderRadius.circular(16),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            channel.name,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
             ),
-            const SizedBox(width: 6),
-            isJoining
-                ? const SizedBox(
-                    width: 12,
-                    height: 12,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 1.5,
-                      valueColor: AlwaysStoppedAnimation(Color(0xFF34D399)),
-                    ),
-                  )
-                : const Text(
-                    'join',
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF6EE7B7),
-                    ),
+          ),
+          const SizedBox(width: 6),
+          isJoining
+              ? const SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.5,
+                    valueColor: AlwaysStoppedAnimation(Color(0xFF34D399)),
                   ),
-          ],
-        ),
+                )
+              : const Text(
+                  'join',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF6EE7B7),
+                  ),
+                ),
+        ],
       ),
     );
   }
@@ -388,6 +436,7 @@ class WebNavbar extends StatelessWidget {
   Widget _buildMemberChannels(BuildContext context) {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
+      physics: const ClampingScrollPhysics(),
       child: Row(
         children: [
           ...userChannels.map((c) => Padding(
@@ -400,24 +449,20 @@ class WebNavbar extends StatelessWidget {
     );
   }
 
- Widget _buildMemberChip(UserChannel channel) {
-  final bool isSelected = selectedChannelId != null
-      ? selectedChannelId == channel.channelId
-      : (userChannels.isNotEmpty &&
-          channel.channelId == userChannels.first.channelId);
+  Widget _buildMemberChip(UserChannel channel) {
+    final bool isSelected = selectedChannelId != null
+        ? selectedChannelId == channel.channelId
+        : (userChannels.isNotEmpty &&
+            channel.channelId == userChannels.first.channelId);
 
-  final sortedMembers = List<ChannelMember>.from(channel.members)
-    ..sort((a, b) => b.seasonPoints.compareTo(a.seasonPoints));
-  final leader = sortedMembers.isNotEmpty ? sortedMembers.first : null;
+    final sortedMembers = List<ChannelMember>.from(channel.members)
+      ..sort((a, b) => b.seasonPoints.compareTo(a.seasonPoints));
+    final leader = sortedMembers.isNotEmpty ? sortedMembers.first : null;
 
-  return GestureDetector(
-    onTap: () => onChannelSelected(channel),  // ✅ Tap = select channel
-    onLongPress: () {
-      // ✅ Long press = open chat (same as HomePage)
-      // You need to add a callback for this
-      // onOpenChat?.call(channel);
-    },
-    child: Container(
+    return _WebTappable(
+      onTap: () => onChannelSelected(channel), // ✅ Tap = select channel
+      onLongPress: () => onOpenChat?.call(channel), // ✅ Long press = open chat
+      borderRadius: BorderRadius.circular(16),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -455,22 +500,21 @@ class WebNavbar extends StatelessWidget {
           ],
         ],
       ),
-    ),
-  );
-}
+    );
+  }
+
   Widget _buildCreateChip() {
     final bool isFull = userChannels.length >= maxChannels;
-    return GestureDetector(
+    return _WebTappable(
       onTap: isFull ? null : onCreateChannel,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        child: Icon(
-          Icons.add_rounded,
-          size: 17,
-          color: isFull
-              ? Colors.white.withValues(alpha: 0.25)
-              : const Color(0xFF6EE7B7),
-        ),
+      borderRadius: BorderRadius.circular(20),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      child: Icon(
+        Icons.add_rounded,
+        size: 17,
+        color: isFull
+            ? Colors.white.withValues(alpha: 0.25)
+            : const Color(0xFF6EE7B7),
       ),
     );
   }
@@ -519,12 +563,14 @@ class WebNavbar extends StatelessWidget {
   // NOTIFICATIONS — plain bell icon
   // ==========================================================================
   Widget _buildNotificationIcon() {
-    return GestureDetector(
+    return _WebTappable(
       onTap: onNotificationTap,
+      borderRadius: BorderRadius.circular(20),
+      padding: const EdgeInsets.all(6), // bigger hit area than the bare icon
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          Icon(
+          const Icon(
             Icons.notifications_none_outlined,
             size: 24,
             color: Colors.white,
@@ -560,8 +606,9 @@ class WebNavbar extends StatelessWidget {
   // AVATAR — circular with border, loads a real placeholder photo
   // ==========================================================================
   Widget _buildAvatar() {
-    return GestureDetector(
+    return _WebTappable(
       onTap: onMenuTap,
+      borderRadius: BorderRadius.circular(21),
       child: Container(
         width: 42,
         height: 42,
