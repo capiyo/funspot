@@ -105,7 +105,10 @@ class WebNavbar extends StatelessWidget {
   final String? nickname;
   final String? teamName;
   final String? country;
+
+  // Tap channel name -> open chat. Tap leader badge -> open leaderboard.
   final ValueChanged<UserChannel>? onOpenChat;
+  final ValueChanged<UserChannel>? onOpenLeaderboard;
 
   const WebNavbar({
     super.key,
@@ -127,6 +130,7 @@ class WebNavbar extends StatelessWidget {
     this.teamName,
     this.country,
     this.onOpenChat,
+    this.onOpenLeaderboard,
   });
 
   bool get _hasProfileInfo =>
@@ -173,7 +177,7 @@ class WebNavbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 68,
+      height: 52, // slimmer bar (was 68)
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           begin: Alignment.centerLeft,
@@ -183,8 +187,8 @@ class WebNavbar extends StatelessWidget {
         boxShadow: [
           BoxShadow(
             color: const Color(0xFF059669).withValues(alpha: 0.25),
-            blurRadius: 20,
-            offset: const Offset(0, 6),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
           ),
         ],
         border: const Border(
@@ -194,22 +198,23 @@ class WebNavbar extends StatelessWidget {
           ),
         ),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 24),
+      padding: const EdgeInsets.symmetric(horizontal: 16), // was 24
       child: Row(
         children: [
           // 1. App name / logo
           _buildLogo(),
-          const SizedBox(width: 20),
+          const SizedBox(width: 14),
 
           if (isLoggedIn && _hasProfileInfo) ...[
             _buildProfileInfo(),
-            const SizedBox(width: 20),
+            const SizedBox(width: 14),
           ],
 
-          // 2. All-channels carousel — auto-scrolls through every channel,
-          //    showing its name, current top leader, and a Join button for
-          //    channels the user hasn't joined yet.
-          Expanded(
+          // 2. All-channels carousel — sized to its content (not stretched
+          //    across the whole Row anymore), still auto-scrolls internally
+          //    if it has more items than fit in the cap.
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
             child: _ChannelCarousel(
               channels: allChannels,
               memberChannelIds: _memberChannelIds,
@@ -218,18 +223,28 @@ class WebNavbar extends StatelessWidget {
               onChannelTap: onChannelSelected,
             ),
           ),
-          const SizedBox(width: 16),
+
+          // ✅ Real spacer — absorbs whatever space is left so the entire
+          // right-hand cluster (search, my channels, +, bell, avatar) stays
+          // glued together and pinned flush against the right edge no
+          // matter the screen width or how many carousel/channel chips
+          // exist.
+          const Spacer(),
 
           // 3. Search bar
           _buildSearch(),
-          const SizedBox(width: 16),
+          const SizedBox(width: 12),
 
-          // 4. The user's own joined channels
-          Flexible(child: _buildUserChannels(context)),
-          const SizedBox(width: 16),
+          // 4. The user's own joined channels — capped so it can never
+          //    push notification/avatar off-screen; scrolls internally.
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 260),
+            child: _buildUserChannels(context),
+          ),
+          const SizedBox(width: 12),
 
           _buildNotificationIcon(),
-          const SizedBox(width: 16),
+          const SizedBox(width: 12),
           _buildAvatar(),
         ],
       ),
@@ -243,8 +258,8 @@ class WebNavbar extends StatelessWidget {
     return Row(
       children: [
         Container(
-          width: 42,
-          height: 42,
+          width: 32, // was 42
+          height: 32,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             border: Border.all(
@@ -257,11 +272,11 @@ class WebNavbar extends StatelessWidget {
             child: Icon(
               Icons.sports_soccer,
               color: Color(0xFF34D399),
-              size: 24,
+              size: 18, // was 24
             ),
           ),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 10), // was 12
         ShaderMask(
           shaderCallback: (bounds) => const LinearGradient(
             colors: [Colors.white, Color(0xFFDFF7EA)],
@@ -269,32 +284,32 @@ class WebNavbar extends StatelessWidget {
           child: const Text(
             'Funspot',
             style: TextStyle(
-              fontSize: 21,
+              fontSize: 16, // was 21
               fontWeight: FontWeight.w800,
               color: Colors.white,
-              letterSpacing: -0.5,
+              letterSpacing: -0.4,
             ),
           ),
         ),
         Container(
-          margin: const EdgeInsets.only(left: 8),
-          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+          margin: const EdgeInsets.only(left: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
           decoration: BoxDecoration(
             gradient: const LinearGradient(
               colors: FunspotGradients.gold,
             ),
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(5),
             boxShadow: [
               BoxShadow(
                 color: const Color(0xFFF5B841).withValues(alpha: 0.4),
-                blurRadius: 6,
+                blurRadius: 5,
               ),
             ],
           ),
           child: const Text(
             'BETA',
             style: TextStyle(
-              fontSize: 8,
+              fontSize: 7, // was 8
               fontWeight: FontWeight.w800,
               color: Color(0xFF0B3D2E),
               letterSpacing: 1,
@@ -310,10 +325,10 @@ class WebNavbar extends StatelessWidget {
   // ==========================================================================
   Widget _buildProfileInfo() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5), // was 14/8
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
         border: Border.all(
           color: Colors.white.withValues(alpha: 0.14),
           width: 0.7,
@@ -353,14 +368,14 @@ class WebNavbar extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 13, color: const Color(0xFF6EE7B7)),
-        const SizedBox(width: 5),
+        Icon(icon, size: 11, color: const Color(0xFF6EE7B7)), // was 13
+        const SizedBox(width: 4),
         ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 110),
+          constraints: const BoxConstraints(maxWidth: 100),
           child: Text(
             value,
             style: const TextStyle(
-              fontSize: 12,
+              fontSize: 11, // was 12
               fontWeight: FontWeight.w600,
               color: Colors.white,
             ),
@@ -374,9 +389,9 @@ class WebNavbar extends StatelessWidget {
 
   Widget _buildProfileInfoDivider() {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 10),
+      margin: const EdgeInsets.symmetric(horizontal: 8),
       width: 1,
-      height: 14,
+      height: 12,
       color: Colors.white.withValues(alpha: 0.18),
     );
   }
@@ -397,10 +412,10 @@ class WebNavbar extends StatelessWidget {
             'No channels joined',
             style: FanTypography.caption.copyWith(
               color: Colors.white.withValues(alpha: 0.7),
-              fontSize: 12,
+              fontSize: 11,
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 6),
           _buildCreateChip(),
         ],
       );
@@ -415,7 +430,7 @@ class WebNavbar extends StatelessWidget {
       child: Row(
         children: [
           ...userChannels.map((c) => Padding(
-                padding: const EdgeInsets.only(right: 8),
+                padding: const EdgeInsets.only(right: 6),
                 child: _buildMemberChip(c),
               )),
           _buildCreateChip(),
@@ -434,41 +449,55 @@ class WebNavbar extends StatelessWidget {
       ..sort((a, b) => b.seasonPoints.compareTo(a.seasonPoints));
     final leader = sortedMembers.isNotEmpty ? sortedMembers.first : null;
 
-    return _WebTappable(
-      onTap: () => onChannelSelected(channel), // ✅ Tap = select channel
-      onLongPress: () => onOpenChat?.call(channel), // ✅ Long press = open chat
-      borderRadius: BorderRadius.circular(16),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2), // was 4/4
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           if (channel.isAdmin) ...[
-            const Text('👑', style: TextStyle(fontSize: 11)),
-            const SizedBox(width: 4),
+            const Text('👑', style: TextStyle(fontSize: 10)),
+            const SizedBox(width: 3),
           ],
-          Text(
-            channel.name,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: isSelected ? const Color(0xFF6EE7B7) : Colors.white,
-              decoration: isSelected ? TextDecoration.underline : null,
+
+          // ✅ Tap channel name -> open chat (also marks it selected)
+          _WebTappable(
+            onTap: () {
+              onChannelSelected(channel);
+              onOpenChat?.call(channel);
+            },
+            borderRadius: BorderRadius.circular(8),
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 4),
+            child: Text(
+              channel.name,
+              style: TextStyle(
+                fontSize: 12, // was 13
+                fontWeight: FontWeight.w600,
+                color: isSelected ? const Color(0xFF6EE7B7) : Colors.white,
+                decoration: isSelected ? TextDecoration.underline : null,
+              ),
             ),
           ),
+
+          // ✅ Tap leader badge -> open leaderboard
           if (leader != null) ...[
-            const SizedBox(width: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(colors: FunspotGradients.gold),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                '${leader.username} (${leader.seasonPoints}pts)',
-                style: const TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF0B3D2E),
+            const SizedBox(width: 4),
+            _WebTappable(
+              onTap: () => onOpenLeaderboard?.call(channel),
+              borderRadius: BorderRadius.circular(7),
+              padding: const EdgeInsets.symmetric(horizontal: 1, vertical: 1),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(colors: FunspotGradients.gold),
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                child: Text(
+                  '${leader.username} (${leader.seasonPoints}pts)',
+                  style: const TextStyle(
+                    fontSize: 9, // was 10
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF0B3D2E),
+                  ),
                 ),
               ),
             ),
@@ -482,11 +511,11 @@ class WebNavbar extends StatelessWidget {
     // No cap anymore — always tappable.
     return _WebTappable(
       onTap: onCreateChannel,
-      borderRadius: BorderRadius.circular(20),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      borderRadius: BorderRadius.circular(18),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       child: const Icon(
         Icons.add_rounded,
-        size: 17,
+        size: 15, // was 17
         color: Color(0xFF6EE7B7),
       ),
     );
@@ -497,11 +526,11 @@ class WebNavbar extends StatelessWidget {
   // ==========================================================================
   Widget _buildSearch() {
     return Container(
-      width: 200,
-      height: 40,
+      width: 180, // was 200
+      height: 32, // was 40
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(
           color: Colors.white.withValues(alpha: 0.16),
           width: 0.7,
@@ -510,23 +539,23 @@ class WebNavbar extends StatelessWidget {
       child: TextField(
         style: const TextStyle(
           fontWeight: FontWeight.w600,
-          fontSize: 13,
+          fontSize: 12, // was 13
           color: Colors.white,
         ),
         decoration: InputDecoration(
           hintText: 'Search...',
           hintStyle: TextStyle(
             color: Colors.white.withValues(alpha: 0.55),
-            fontSize: 13,
+            fontSize: 12,
             fontWeight: FontWeight.w500,
           ),
           prefixIcon: Icon(
             Icons.search,
-            size: 18,
+            size: 16, // was 18
             color: Colors.white.withValues(alpha: 0.6),
           ),
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(vertical: 8),
+          contentPadding: const EdgeInsets.symmetric(vertical: 4), // was 8
         ),
       ),
     );
@@ -538,23 +567,23 @@ class WebNavbar extends StatelessWidget {
   Widget _buildNotificationIcon() {
     return _WebTappable(
       onTap: onNotificationTap,
-      borderRadius: BorderRadius.circular(20),
-      padding: const EdgeInsets.all(6), // bigger hit area than the bare icon
+      borderRadius: BorderRadius.circular(18),
+      padding: const EdgeInsets.all(4), // was 6, bigger hit area than the bare icon
       child: Stack(
         clipBehavior: Clip.none,
         children: [
           const Icon(
             Icons.notifications_none_outlined,
-            size: 24,
+            size: 20, // was 24
             color: Colors.white,
           ),
           if (notificationCount > 0)
             Positioned(
-              top: -4,
-              right: -6,
+              top: -2,
+              right: -4,
               child: Container(
                 padding: const EdgeInsets.all(3),
-                constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                constraints: const BoxConstraints(minWidth: 14, minHeight: 14),
                 decoration: const BoxDecoration(
                   color: Colors.red,
                   shape: BoxShape.circle,
@@ -563,7 +592,7 @@ class WebNavbar extends StatelessWidget {
                   notificationCount > 99 ? '99+' : notificationCount.toString(),
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 8,
+                    fontSize: 7, // was 8
                     fontWeight: FontWeight.w800,
                   ),
                   textAlign: TextAlign.center,
@@ -581,10 +610,10 @@ class WebNavbar extends StatelessWidget {
   Widget _buildAvatar() {
     return _WebTappable(
       onTap: onMenuTap,
-      borderRadius: BorderRadius.circular(21),
+      borderRadius: BorderRadius.circular(17),
       child: Container(
-        width: 42,
-        height: 42,
+        width: 34, // was 42
+        height: 34,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           border: Border.all(
@@ -597,16 +626,16 @@ class WebNavbar extends StatelessWidget {
               ? Image.network(
                   _avatarUrlFor(userId),
                   fit: BoxFit.cover,
-                  width: 42,
-                  height: 42,
+                  width: 34,
+                  height: 34,
                   loadingBuilder: (context, child, progress) {
                     if (progress == null) return child;
                     return Container(
                       color: const Color(0xFF0B3D2E),
                       child: const Center(
                         child: SizedBox(
-                          width: 16,
-                          height: 16,
+                          width: 14,
+                          height: 14,
                           child: CircularProgressIndicator(
                             strokeWidth: 1.5,
                             valueColor:
@@ -621,7 +650,7 @@ class WebNavbar extends StatelessWidget {
                     child: const Icon(
                       Icons.person_outline,
                       color: Colors.white,
-                      size: 20,
+                      size: 16,
                     ),
                   ),
                 )
@@ -630,7 +659,7 @@ class WebNavbar extends StatelessWidget {
                   child: const Icon(
                     Icons.person_outline,
                     color: Colors.white,
-                    size: 20,
+                    size: 16,
                   ),
                 ),
         ),
@@ -644,9 +673,10 @@ class WebNavbar extends StatelessWidget {
 // ----------------------------------------------------------------------------
 // Auto-scrolling, unstyled (no background/border) horizontal list of every
 // channel — name, current top leader, and a Join button for channels the
-// user hasn't joined. About 5 channels are visible at a time depending on
-// the space `Expanded` gives it; the list keeps auto-advancing through the
-// rest and loops back to the start. Manual horizontal drag still works.
+// user hasn't joined. Sized to its content (capped by the parent's
+// ConstrainedBox) rather than stretching across the whole Row, so it no
+// longer leaves a dead empty gap before the search bar. Manual horizontal
+// drag still works.
 // ============================================================================
 
 class _ChannelCarousel extends StatefulWidget {
@@ -675,7 +705,7 @@ class _ChannelCarouselState extends State<_ChannelCarousel> {
   // Roughly the width of one carousel entry (name + leader + join button).
   // Used as the auto-scroll step so each "tick" advances by about one
   // channel at a time.
-  static const double _stepWidth = 190;
+  static const double _stepWidth = 170;
   static const Duration _tickInterval = Duration(seconds: 3);
   static const Duration _scrollAnimDuration = Duration(milliseconds: 700);
 
@@ -730,17 +760,22 @@ class _ChannelCarouselState extends State<_ChannelCarousel> {
         'No channels available',
         style: FanTypography.caption.copyWith(
           color: Colors.white.withValues(alpha: 0.7),
-          fontSize: 12,
+          fontSize: 11,
         ),
       );
     }
 
+    // Shrink-wraps to its content (up to the parent's maxWidth cap) instead
+    // of an Expanded/SizedBox(width: double.infinity) that stretched across
+    // the whole Row and left a visible dead gap when there weren't enough
+    // channels to fill it.
     return SizedBox(
-      height: 40,
+      height: 32, // was 40
       child: ListView.builder(
         controller: _scrollController,
         scrollDirection: Axis.horizontal,
         physics: const ClampingScrollPhysics(),
+        shrinkWrap: true,
         itemCount: channels.length,
         itemBuilder: (context, index) {
           final channel = channels[index];
@@ -785,40 +820,40 @@ class _CarouselEntry extends StatelessWidget {
     // inked via _WebTappable so clicks/hover still register on web.
     return _WebTappable(
       onTap: onTap,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6), // was 10/8
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
             channel.name,
             style: const TextStyle(
-              fontSize: 13,
+              fontSize: 12, // was 13
               fontWeight: FontWeight.w600,
               color: Colors.white,
             ),
           ),
           if (leader != null) ...[
-            const SizedBox(width: 6),
-            const Icon(Icons.emoji_events, size: 12, color: Color(0xFFF5B841)),
+            const SizedBox(width: 5),
+            const Icon(Icons.emoji_events, size: 11, color: Color(0xFFF5B841)),
             const SizedBox(width: 3),
             Text(
               leader.username,
               style: const TextStyle(
-                fontSize: 11,
+                fontSize: 10, // was 11
                 fontWeight: FontWeight.w600,
                 color: Color(0xFFFFE08A),
               ),
             ),
           ],
           if (!isMember) ...[
-            const SizedBox(width: 8),
+            const SizedBox(width: 6),
             _WebTappable(
               onTap: isJoining ? null : onJoin,
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
               child: isJoining
                   ? const SizedBox(
-                      width: 12,
-                      height: 12,
+                      width: 11,
+                      height: 11,
                       child: CircularProgressIndicator(
                         strokeWidth: 1.5,
                         valueColor: AlwaysStoppedAnimation(Color(0xFF34D399)),
@@ -827,7 +862,7 @@ class _CarouselEntry extends StatelessWidget {
                   : const Text(
                       'Join',
                       style: TextStyle(
-                        fontSize: 11,
+                        fontSize: 10, // was 11
                         fontWeight: FontWeight.w800,
                         color: Color(0xFF6EE7B7),
                         decoration: TextDecoration.underline,
