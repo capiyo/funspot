@@ -93,6 +93,260 @@ class WebChannelMember {
 }
 
 // ============================================================================
+// CHANNEL DISPLAY ADAPTERS
+// ----------------------------------------------------------------------------
+// The panel needs to render channel data from two sources: the real
+// `UserChannel` model coming from the API, and hardcoded mock data used as
+// a preview when no user is signed in. Rather than forcing mock data
+// through the real `UserChannel` constructor (whose exact fields/required
+// params live in models/user_channel.dart and may not match 1:1), both
+// sources are wrapped behind this small `ChannelLike` interface so the
+// rendering code (`_buildChannelFragment`, `_buildChannelTabBar`, etc.)
+// doesn't care which one it's looking at.
+//
+// NOTE: `_RealChannelAdapter` assumes `UserChannel` exposes `name`,
+// `memberCount`, `season`, `isAdmin`, and `members` (each member exposing
+// `userId`, `username`, `correctVotes`, `totalVotes`, `msgCount`,
+// `seasonPoints`) — the same fields the original code already read off of
+// it. If your actual model differs, adjust `_RealChannelAdapter` only.
+// ============================================================================
+
+abstract class ChannelMemberLike {
+  String get userId;
+  String get username;
+  int get correctVotes;
+  int get totalVotes;
+  int get msgCount;
+  int get seasonPoints;
+}
+
+abstract class ChannelLike {
+  String get name;
+  int get memberCount;
+  String get season;
+  bool get isAdmin;
+  List<ChannelMemberLike> get members;
+}
+
+class _RealMemberAdapter implements ChannelMemberLike {
+  final dynamic _m;
+  _RealMemberAdapter(this._m);
+
+  @override
+  String get userId => _m.userId?.toString() ?? '';
+  @override
+  String get username => _m.username?.toString() ?? '';
+  @override
+  int get correctVotes => _m.correctVotes ?? 0;
+  @override
+  int get totalVotes => _m.totalVotes ?? 0;
+  @override
+  int get msgCount => _m.msgCount ?? 0;
+  @override
+  int get seasonPoints => _m.seasonPoints ?? 0;
+}
+
+class _RealChannelAdapter implements ChannelLike {
+  final UserChannel channel;
+  _RealChannelAdapter(this.channel);
+
+  @override
+  String get name => channel.name;
+  @override
+  int get memberCount => channel.memberCount;
+  @override
+  String get season => channel.season.toString();
+  @override
+  bool get isAdmin => channel.isAdmin;
+  @override
+  List<ChannelMemberLike> get members =>
+      channel.members.map((m) => _RealMemberAdapter(m)).toList();
+}
+
+class _MockMember implements ChannelMemberLike {
+  @override
+  final String userId;
+  @override
+  final String username;
+  @override
+  final int correctVotes;
+  @override
+  final int totalVotes;
+  @override
+  final int msgCount;
+  @override
+  final int seasonPoints;
+
+  const _MockMember({
+    required this.userId,
+    required this.username,
+    required this.correctVotes,
+    required this.totalVotes,
+    required this.msgCount,
+    required this.seasonPoints,
+  });
+}
+
+class _MockChannel implements ChannelLike {
+  @override
+  final String name;
+  @override
+  final int memberCount;
+  @override
+  final String season;
+  @override
+  final bool isAdmin;
+  @override
+  final List<ChannelMemberLike> members;
+
+  const _MockChannel({
+    required this.name,
+    required this.memberCount,
+    required this.season,
+    required this.isAdmin,
+    required this.members,
+  });
+}
+
+// ============================================================================
+// MOCK DATA (shown when no user is signed in / no user id resolves)
+// ============================================================================
+
+WebUserData _mockUserData() => WebUserData(
+      userId: 'mock_user',
+      username: 'guest_fan',
+      phone: '',
+      nickname: 'Guest Fan',
+      clubFan: 'Arsenal',
+      countryFan: 'Kenya',
+      numberOfBets: 24,
+      balance: 0.0,
+    );
+
+List<ChannelLike> _mockChannels() => [
+      _MockChannel(
+        name: 'Premier League',
+        memberCount: 5,
+        season: '3',
+        isAdmin: true,
+        members: const [
+          _MockMember(
+            userId: 'm1',
+            username: 'kip_ochieng',
+            correctVotes: 41,
+            totalVotes: 52,
+            msgCount: 118,
+            seasonPoints: 980,
+          ),
+          _MockMember(
+            userId: 'm2',
+            username: 'brenda_w',
+            correctVotes: 37,
+            totalVotes: 50,
+            msgCount: 96,
+            seasonPoints: 860,
+          ),
+          _MockMember(
+            userId: 'm3',
+            username: 'the_gooner',
+            correctVotes: 33,
+            totalVotes: 48,
+            msgCount: 74,
+            seasonPoints: 745,
+          ),
+          _MockMember(
+            userId: 'm4',
+            username: 'ngugi_j',
+            correctVotes: 29,
+            totalVotes: 45,
+            msgCount: 61,
+            seasonPoints: 640,
+          ),
+          _MockMember(
+            userId: 'm5',
+            username: 'faith_m',
+            correctVotes: 22,
+            totalVotes: 40,
+            msgCount: 39,
+            seasonPoints: 510,
+          ),
+        ],
+      ),
+      _MockChannel(
+        name: 'World Cup Warriors',
+        memberCount: 4,
+        season: '1',
+        isAdmin: false,
+        members: const [
+          _MockMember(
+            userId: 'm6',
+            username: 'samuel_k',
+            correctVotes: 19,
+            totalVotes: 25,
+            msgCount: 44,
+            seasonPoints: 420,
+          ),
+          _MockMember(
+            userId: 'm7',
+            username: 'guest_fan',
+            correctVotes: 15,
+            totalVotes: 22,
+            msgCount: 30,
+            seasonPoints: 360,
+          ),
+          _MockMember(
+            userId: 'm8',
+            username: 'wanjiru_a',
+            correctVotes: 14,
+            totalVotes: 21,
+            msgCount: 27,
+            seasonPoints: 330,
+          ),
+          _MockMember(
+            userId: 'm9',
+            username: 'derek_o',
+            correctVotes: 10,
+            totalVotes: 20,
+            msgCount: 12,
+            seasonPoints: 210,
+          ),
+        ],
+      ),
+      _MockChannel(
+        name: 'Local Derby Crew',
+        memberCount: 3,
+        season: '2',
+        isAdmin: false,
+        members: const [
+          _MockMember(
+            userId: 'm10',
+            username: 'coach_otieno',
+            correctVotes: 28,
+            totalVotes: 33,
+            msgCount: 152,
+            seasonPoints: 890,
+          ),
+          _MockMember(
+            userId: 'm11',
+            username: 'zawadi_n',
+            correctVotes: 20,
+            totalVotes: 30,
+            msgCount: 88,
+            seasonPoints: 610,
+          ),
+          _MockMember(
+            userId: 'm12',
+            username: 'guest_fan',
+            correctVotes: 16,
+            totalVotes: 28,
+            msgCount: 51,
+            seasonPoints: 470,
+          ),
+        ],
+      ),
+    ];
+
+// ============================================================================
 // WEB PROFILE PANEL - SUPPORTS BOTH OWN AND OTHER USER PROFILES
 // ============================================================================
 
@@ -123,10 +377,22 @@ class _WebProfilePanelState extends State<WebProfilePanel>
   final AuthService _authService = AuthService();
 
   String get _viewingUserId => widget.userId ?? _authService.userId ?? '';
-  String get _viewingUsername => widget.username ?? _authService.username ?? '';
+  String get _viewingUsername => _isMockMode
+      ? _userData!.username
+      : (widget.username ?? _authService.username ?? '');
   String get _viewingPhone => widget.phone ?? _authService.phone ?? '';
 
-  bool get _isCurrentUser => _viewingUserId == _authService.userId;
+  // True only for a real, resolved user id matching the signed-in account.
+  // Mock mode is never treated as "current user" so edit/logout/payment
+  // actions stay hidden for the preview data.
+  bool get _isCurrentUser =>
+      !_isMockMode &&
+      _viewingUserId.isNotEmpty &&
+      _viewingUserId == _authService.userId;
+
+  // True when we're showing hardcoded preview data because no user id
+  // resolved (e.g. nobody is signed in yet).
+  bool _isMockMode = false;
 
   WebUserData? _userData;
   bool _isLoading = true;
@@ -134,7 +400,7 @@ class _WebProfilePanelState extends State<WebProfilePanel>
   bool _isSaving = false;
   bool _isLoggingOut = false;
 
-  List<UserChannel> _userChannels = [];
+  List<ChannelLike> _userChannels = [];
   bool _isChannelsLoading = true;
   late TabController _tabController;
   int _selectedTab = 0;
@@ -199,12 +465,9 @@ class _WebProfilePanelState extends State<WebProfilePanel>
 
   Future<void> _loadAllData() async {
     if (_viewingUserId.isEmpty) {
-      setState(() {
-        _isLoading = false;
-        _isChannelsLoading = false;
-        _userData = null;
-        _userChannels = [];
-      });
+      // Nobody resolved (not signed in, or no userId passed in) — show a
+      // read-only preview built from mock data instead of an empty state.
+      _loadMockData();
       return;
     }
 
@@ -215,6 +478,38 @@ class _WebProfilePanelState extends State<WebProfilePanel>
 
     if (_isCurrentUser) {
       _initPaymentGate();
+    }
+  }
+
+  void _loadMockData() {
+    final mockUser = _mockUserData();
+    final mockChannels = _mockChannels();
+
+    setState(() {
+      _isMockMode = true;
+      _userData = mockUser;
+      _balance = mockUser.balance;
+      _nicknameController.text = mockUser.nickname;
+      _clubController.text = mockUser.clubFan;
+      _countryController.text = mockUser.countryFan;
+
+      _userChannels = mockChannels;
+      _showPaymentFeatures = false; // no real balance to show in preview
+      _isBalanceLoading = false;
+      _isLoading = false;
+      _isChannelsLoading = false;
+      _isEditing = false;
+    });
+
+    final newCount = mockChannels.length.clamp(0, 3);
+    if (newCount != _tabController.length) {
+      _tabController.dispose();
+      _tabController = TabController(length: newCount, vsync: this);
+      _tabController.addListener(() {
+        if (_tabController.indexIsChanging) {
+          setState(() => _selectedTab = _tabController.index);
+        }
+      });
     }
   }
 
@@ -323,6 +618,7 @@ class _WebProfilePanelState extends State<WebProfilePanel>
         final List<dynamic> channelsData = data['channels'] ?? [];
         final channels = channelsData
             .map((c) => UserChannel.fromJson(c as Map<String, dynamic>))
+            .map<ChannelLike>((c) => _RealChannelAdapter(c))
             .toList();
 
         setState(() {
@@ -1173,9 +1469,37 @@ class _WebProfilePanelState extends State<WebProfilePanel>
     );
   }
 
+  Widget _buildMockBanner() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: FanColors.primaryDim,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: FanColors.borderActive, width: 0.5),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.visibility_outlined, size: 13, color: FanColors.primary),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              'Preview data — log in to see your own profile',
+              style: FanTypography.caption.copyWith(
+                fontSize: 9,
+                color: FanColors.textSecondary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildProfileView() {
     return Column(
       children: [
+        if (_isMockMode) _buildMockBanner(),
         _buildInfoRow(
           icon: Icons.person_outline,
           label: 'Username',
@@ -1231,6 +1555,15 @@ class _WebProfilePanelState extends State<WebProfilePanel>
                 ),
               ),
             ],
+          )
+        else if (_isMockMode)
+          _buildActionButton(
+            label: 'Log In',
+            icon: Icons.login_outlined,
+            onTap: () {
+              // Hook this up to your real login flow / route.
+            },
+            isPrimary: true,
           ),
       ],
     );
@@ -1410,6 +1743,14 @@ class _WebProfilePanelState extends State<WebProfilePanel>
   // ==========================================================================
   // CHANNELS SECTION (header + tab bar + tab view, all rendered together)
   // ==========================================================================
+  //
+  // NOTE: this widget must be placed inside an Expanded/Flexible ancestor
+  // with a bounded height (e.g. a Column that is itself Expanded inside the
+  // panel's outer Column) — NOT inside a SingleChildScrollView. The
+  // Expanded(TabBarView) below needs a bounded height to size against, and
+  // it's what lets the member list claim any leftover vertical space
+  // instead of leaving a gap under the tabs.
+  // ==========================================================================
 
   Widget _buildChannelsSection() {
     final channelCount = _userChannels.length.clamp(0, 3);
@@ -1433,7 +1774,7 @@ class _WebProfilePanelState extends State<WebProfilePanel>
               ),
               const SizedBox(width: 6),
               Text(
-                'Channels',
+                _isMockMode ? 'Channels (preview)' : 'Channels',
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
@@ -1442,8 +1783,7 @@ class _WebProfilePanelState extends State<WebProfilePanel>
               ),
               const Spacer(),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                 decoration: BoxDecoration(
                   color: FanColors.primary.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(10),
@@ -1466,11 +1806,12 @@ class _WebProfilePanelState extends State<WebProfilePanel>
         _buildChannelTabBar(),
         const SizedBox(height: 2),
 
-        // Fixed-height tab view so it can live inside the outer scroll view.
-        // Horizontal swipe between tabs still works; vertical drag physics
-        // are disabled here so it doesn't fight the outer scroll gesture.
-        SizedBox(
-          height: 180,
+        // Expanded so the tab view claims whatever vertical space is left
+        // in the panel, instead of being capped at a fixed height while
+        // empty space sits below it. Horizontal swipe between tabs still
+        // works; vertical drag physics are disabled so it doesn't fight
+        // any scroll gesture above it.
+        Expanded(
           child: TabBarView(
             controller: _tabController,
             physics: const NeverScrollableScrollPhysics(),
@@ -1491,49 +1832,8 @@ class _WebProfilePanelState extends State<WebProfilePanel>
 
   @override
   Widget build(BuildContext context) {
-    if (_viewingUserId.isEmpty) {
-      return Container(
-        width: 240,
-        decoration: BoxDecoration(
-          color: FanColors.surfaceElevated,
-          border: Border(
-            right: BorderSide(
-              color: FanColors.border.withValues(alpha: 0.5),
-              width: 1,
-            ),
-          ),
-        ),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.person_outline,
-                size: 40,
-                color: FanColors.textTertiary,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                _isCurrentUser ? 'Not logged in' : 'User not found',
-                style: TextStyle(
-                  color: FanColors.textSecondary,
-                  fontSize: 12,
-                ),
-              ),
-              const SizedBox(height: 8),
-              if (_isCurrentUser)
-                ElevatedButton(
-                  onPressed: () {
-                    // Navigate to login
-                  },
-                  child: const Text('Login'),
-                ),
-            ],
-          ),
-        ),
-      );
-    }
-
+    // Loading state — mock mode resolves synchronously so this only ever
+    // fires for a real, in-flight fetch.
     if (_isLoading || _isCheckingVisibility || _isChannelsLoading) {
       return Container(
         width: 240,
@@ -1627,36 +1927,54 @@ class _WebProfilePanelState extends State<WebProfilePanel>
           ),
           const Divider(height: 1),
 
-          // Everything below lives in ONE scrollable region now, so the
-          // Channels section sits immediately after the profile content
-          // instead of being pushed down by leftover Expanded space.
+          // Body: a scrollable top section (balance card + profile fields)
+          // plus, when channels exist, a flexible bottom section whose
+          // TabBarView expands to fill any leftover height. These are two
+          // separate flex children of this Column (NOT nested inside one
+          // SingleChildScrollView) so the channels' Expanded(TabBarView)
+          // has a bounded height to grow into.
           Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: Column(
-                children: [
-                  // Balance card - only for current user
-                  if (_isCurrentUser &&
-                      _showPaymentFeatures &&
-                      _userData != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: _buildBalanceCard(),
+            child: Column(
+              children: [
+                Flexible(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                    child: Column(
+                      children: [
+                        // Balance card - only for current user
+                        if (_isCurrentUser &&
+                            _showPaymentFeatures &&
+                            _userData != null)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: _buildBalanceCard(),
+                          ),
+
+                        // Profile content
+                        if (_isEditing) ...[
+                          _buildEditMode(),
+                        ] else if (_userData != null) ...[
+                          _buildProfileView(),
+                        ] else ...[
+                          _buildNoProfileView(),
+                        ],
+                      ],
                     ),
+                  ),
+                ),
 
-                  // Profile content
-                  if (_isEditing) ...[
-                    _buildEditMode(),
-                  ] else if (_userData != null) ...[
-                    _buildProfileView(),
-                  ] else ...[
-                    _buildNoProfileView(),
-                  ],
-
-                  // Channels section (header + tab bar + tab view together)
-                  if (_userData != null) _buildChannelsSection(),
-                ],
-              ),
+                // Channels section (header + tab bar + tab view together).
+                // Lives outside the scroll view so its TabBarView can
+                // expand to fill any leftover vertical space instead of
+                // leaving a gap below the tabs.
+                if (_userData != null && _userChannels.isNotEmpty)
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: _buildChannelsSection(),
+                    ),
+                  ),
+              ],
             ),
           ),
         ],

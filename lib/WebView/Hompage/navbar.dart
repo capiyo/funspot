@@ -1,4 +1,5 @@
 // lib/widgets/web_navbar.dart
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../pages/fan_Funzy_design.dart';
 import '../../models/user_channel.dart';
@@ -62,9 +63,8 @@ class _WebTappable extends StatelessWidget {
         onTap: onTap,
         onLongPress: onLongPress,
         borderRadius: borderRadius ?? BorderRadius.circular(8),
-        mouseCursor: onTap == null
-            ? SystemMouseCursors.basic
-            : SystemMouseCursors.click,
+        mouseCursor:
+            onTap == null ? SystemMouseCursors.basic : SystemMouseCursors.click,
         child: Padding(
           padding: padding,
           child: child,
@@ -80,6 +80,13 @@ class WebNavbar extends StatelessWidget {
   final List<UserChannel> allChannels;
   final String? selectedChannelId;
   final Set<String> joiningChannelIds;
+
+  // NOTE: the old 3-channel cap has been removed per product decision —
+  // users can join/create as many channels as they like now. This field
+  // is kept (unused) only so existing call sites that still pass
+  // `maxChannels:` don't break the build; feel free to delete both the
+  // field and the callers' argument once every call site is updated.
+  @Deprecated('The 3-channel limit was removed; this value is now ignored.')
   final int maxChannels;
 
   final ValueChanged<UserChannel> onChannelSelected;
@@ -93,8 +100,8 @@ class WebNavbar extends StatelessWidget {
   // Identity used to pick a deterministic avatar photo.
   final String? userId;
 
-  // Profile summary shown in the middle of the navbar — sourced from
-  // UserData (nickname / clubFan / countryFan) in the parent page.
+  // Profile summary shown near the logo — sourced from UserData
+  // (nickname / clubFan / countryFan) in the parent page.
   final String? nickname;
   final String? teamName;
   final String? country;
@@ -107,6 +114,7 @@ class WebNavbar extends StatelessWidget {
     required this.allChannels,
     this.selectedChannelId,
     this.joiningChannelIds = const {},
+    @Deprecated('The 3-channel limit was removed; this value is now ignored.')
     this.maxChannels = 3,
     required this.onChannelSelected,
     required this.onJoinChannel,
@@ -121,12 +129,13 @@ class WebNavbar extends StatelessWidget {
     this.onOpenChat,
   });
 
-  bool get _hasChannels => userChannels.isNotEmpty;
-
   bool get _hasProfileInfo =>
       (nickname != null && nickname!.isNotEmpty) ||
       (teamName != null && teamName!.isNotEmpty) ||
       (country != null && country!.isNotEmpty);
+
+  Set<String> get _memberChannelIds =>
+      userChannels.map((c) => c.channelId).toSet();
 
   // Pool of 20 placeholder avatar photo indices from pravatar.cc
   static const List<int> _avatarPool = [
@@ -188,16 +197,37 @@ class WebNavbar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Row(
         children: [
+          // 1. App name / logo
           _buildLogo(),
-          const Spacer(),
+          const SizedBox(width: 20),
+
           if (isLoggedIn && _hasProfileInfo) ...[
             _buildProfileInfo(),
-            const Spacer(),
+            const SizedBox(width: 20),
           ],
+
+          // 2. All-channels carousel — auto-scrolls through every channel,
+          //    showing its name, current top leader, and a Join button for
+          //    channels the user hasn't joined yet.
+          Expanded(
+            child: _ChannelCarousel(
+              channels: allChannels,
+              memberChannelIds: _memberChannelIds,
+              joiningChannelIds: joiningChannelIds,
+              onJoinChannel: onJoinChannel,
+              onChannelTap: onChannelSelected,
+            ),
+          ),
+          const SizedBox(width: 16),
+
+          // 3. Search bar
           _buildSearch(),
           const SizedBox(width: 16),
-          Flexible(child: _buildChannelSection(context)),
+
+          // 4. The user's own joined channels
+          Flexible(child: _buildUserChannels(context)),
           const SizedBox(width: 16),
+
           _buildNotificationIcon(),
           const SizedBox(width: 16),
           _buildAvatar(),
@@ -276,7 +306,7 @@ class WebNavbar extends StatelessWidget {
   }
 
   // ==========================================================================
-  // PROFILE INFO — nickname / team / country, centered in the navbar
+  // PROFILE INFO — nickname / team / country
   // ==========================================================================
   Widget _buildProfileInfo() {
     return Container(
@@ -352,25 +382,27 @@ class WebNavbar extends StatelessWidget {
   }
 
   // ==========================================================================
-  // CHANNEL SECTION
+  // USER'S OWN CHANNELS — shown after the search bar, no join-count cap
   // ==========================================================================
-  Widget _buildChannelSection(BuildContext context) {
-    if (!isLoggedIn || !_hasChannels) {
-      return _buildBrowseChannels(context);
+  Widget _buildUserChannels(BuildContext context) {
+    if (!isLoggedIn) {
+      return const SizedBox.shrink();
     }
-    return _buildMemberChannels(context);
-  }
 
-  Widget _buildBrowseChannels(BuildContext context) {
-    final displayChannels = allChannels.isNotEmpty ? allChannels : userChannels;
-
-    if (displayChannels.isEmpty) {
-      return Text(
-        'No channels available',
-        style: FanTypography.caption.copyWith(
-          color: Colors.white.withValues(alpha: 0.7),
-          fontSize: 12,
-        ),
+    if (userChannels.isEmpty) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'No channels joined',
+            style: FanTypography.caption.copyWith(
+              color: Colors.white.withValues(alpha: 0.7),
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(width: 8),
+          _buildCreateChip(),
+        ],
       );
     }
 
@@ -379,63 +411,6 @@ class WebNavbar extends StatelessWidget {
       // ✅ 'clamping' avoids the bouncing-scroll physics grabbing short
       // horizontal drags before a tap can resolve — common cause of
       // "taps only work after a few tries" on web trackpads/mice.
-      physics: const ClampingScrollPhysics(),
-      child: Row(
-        children: [
-          ...displayChannels.map((c) => Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: _buildJoinChip(context, c),
-              )),
-          _buildCreateChip(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildJoinChip(BuildContext context, UserChannel channel) {
-    final bool isJoining = joiningChannelIds.contains(channel.channelId);
-
-    return _WebTappable(
-      onTap: isJoining ? null : () => onJoinChannel(channel),
-      borderRadius: BorderRadius.circular(16),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            channel.name,
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: Colors.white,
-            ),
-          ),
-          const SizedBox(width: 6),
-          isJoining
-              ? const SizedBox(
-                  width: 12,
-                  height: 12,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 1.5,
-                    valueColor: AlwaysStoppedAnimation(Color(0xFF34D399)),
-                  ),
-                )
-              : const Text(
-                  'join',
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                    color: Color(0xFF6EE7B7),
-                  ),
-                ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMemberChannels(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
       physics: const ClampingScrollPhysics(),
       child: Row(
         children: [
@@ -504,17 +479,15 @@ class WebNavbar extends StatelessWidget {
   }
 
   Widget _buildCreateChip() {
-    final bool isFull = userChannels.length >= maxChannels;
+    // No cap anymore — always tappable.
     return _WebTappable(
-      onTap: isFull ? null : onCreateChannel,
+      onTap: onCreateChannel,
       borderRadius: BorderRadius.circular(20),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      child: Icon(
+      child: const Icon(
         Icons.add_rounded,
         size: 17,
-        color: isFull
-            ? Colors.white.withValues(alpha: 0.25)
-            : const Color(0xFF6EE7B7),
+        color: Color(0xFF6EE7B7),
       ),
     );
   }
@@ -661,6 +634,208 @@ class WebNavbar extends StatelessWidget {
                   ),
                 ),
         ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// CHANNEL CAROUSEL
+// ----------------------------------------------------------------------------
+// Auto-scrolling, unstyled (no background/border) horizontal list of every
+// channel — name, current top leader, and a Join button for channels the
+// user hasn't joined. About 5 channels are visible at a time depending on
+// the space `Expanded` gives it; the list keeps auto-advancing through the
+// rest and loops back to the start. Manual horizontal drag still works.
+// ============================================================================
+
+class _ChannelCarousel extends StatefulWidget {
+  final List<UserChannel> channels;
+  final Set<String> memberChannelIds;
+  final Set<String> joiningChannelIds;
+  final ValueChanged<UserChannel> onJoinChannel;
+  final ValueChanged<UserChannel> onChannelTap;
+
+  const _ChannelCarousel({
+    required this.channels,
+    required this.memberChannelIds,
+    required this.joiningChannelIds,
+    required this.onJoinChannel,
+    required this.onChannelTap,
+  });
+
+  @override
+  State<_ChannelCarousel> createState() => _ChannelCarouselState();
+}
+
+class _ChannelCarouselState extends State<_ChannelCarousel> {
+  final ScrollController _scrollController = ScrollController();
+  Timer? _autoScrollTimer;
+
+  // Roughly the width of one carousel entry (name + leader + join button).
+  // Used as the auto-scroll step so each "tick" advances by about one
+  // channel at a time.
+  static const double _stepWidth = 190;
+  static const Duration _tickInterval = Duration(seconds: 3);
+  static const Duration _scrollAnimDuration = Duration(milliseconds: 700);
+
+  @override
+  void initState() {
+    super.initState();
+    _startAutoScroll();
+  }
+
+  void _startAutoScroll() {
+    _autoScrollTimer?.cancel();
+    _autoScrollTimer = Timer.periodic(_tickInterval, (_) => _advance());
+  }
+
+  void _advance() {
+    if (!_scrollController.hasClients) return;
+    final maxExtent = _scrollController.position.maxScrollExtent;
+    if (maxExtent <= 0) return; // nothing to scroll — fits in view already
+
+    final current = _scrollController.offset;
+    final next = current + _stepWidth;
+
+    if (next >= maxExtent) {
+      // Loop back to the start.
+      _scrollController.animateTo(
+        0,
+        duration: _scrollAnimDuration,
+        curve: Curves.easeInOut,
+      );
+    } else {
+      _scrollController.animateTo(
+        next,
+        duration: _scrollAnimDuration,
+        curve: Curves.easeInOut,
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _autoScrollTimer?.cancel();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final channels = widget.channels;
+
+    if (channels.isEmpty) {
+      return Text(
+        'No channels available',
+        style: FanTypography.caption.copyWith(
+          color: Colors.white.withValues(alpha: 0.7),
+          fontSize: 12,
+        ),
+      );
+    }
+
+    return SizedBox(
+      height: 40,
+      child: ListView.builder(
+        controller: _scrollController,
+        scrollDirection: Axis.horizontal,
+        physics: const ClampingScrollPhysics(),
+        itemCount: channels.length,
+        itemBuilder: (context, index) {
+          final channel = channels[index];
+          final isMember = widget.memberChannelIds.contains(channel.channelId);
+          final isJoining =
+              widget.joiningChannelIds.contains(channel.channelId);
+          return _CarouselEntry(
+            channel: channel,
+            isMember: isMember,
+            isJoining: isJoining,
+            onJoin: () => widget.onJoinChannel(channel),
+            onTap: () => widget.onChannelTap(channel),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _CarouselEntry extends StatelessWidget {
+  final UserChannel channel;
+  final bool isMember;
+  final bool isJoining;
+  final VoidCallback onJoin;
+  final VoidCallback onTap;
+
+  const _CarouselEntry({
+    required this.channel,
+    required this.isMember,
+    required this.isJoining,
+    required this.onJoin,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final sortedMembers = List<ChannelMember>.from(channel.members)
+      ..sort((a, b) => b.seasonPoints.compareTo(a.seasonPoints));
+    final leader = sortedMembers.isNotEmpty ? sortedMembers.first : null;
+
+    // No background color or border here by design — just plain content,
+    // inked via _WebTappable so clicks/hover still register on web.
+    return _WebTappable(
+      onTap: onTap,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            channel.name,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
+            ),
+          ),
+          if (leader != null) ...[
+            const SizedBox(width: 6),
+            const Icon(Icons.emoji_events, size: 12, color: Color(0xFFF5B841)),
+            const SizedBox(width: 3),
+            Text(
+              leader.username,
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFFFFE08A),
+              ),
+            ),
+          ],
+          if (!isMember) ...[
+            const SizedBox(width: 8),
+            _WebTappable(
+              onTap: isJoining ? null : onJoin,
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              child: isJoining
+                  ? const SizedBox(
+                      width: 12,
+                      height: 12,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 1.5,
+                        valueColor: AlwaysStoppedAnimation(Color(0xFF34D399)),
+                      ),
+                    )
+                  : const Text(
+                      'Join',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF6EE7B7),
+                        decoration: TextDecoration.underline,
+                      ),
+                    ),
+            ),
+          ],
+        ],
       ),
     );
   }
