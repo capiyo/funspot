@@ -4103,9 +4103,13 @@ Future<void> main() async {
 
   final sw = Stopwatch()..start();
 
-  unawaited(Firebase.initializeApp(
+  // ✅ AWAITED — was `unawaited(...)`. Nothing that touches Firebase
+  // (FirebaseMessaging.instance, FirebaseAuth, etc.) is safe to call
+  // until this has actually completed. Racing it caused an intermittent
+  // JS/Dart interop TypeError inside requestPermission() on web.
+  await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
-  ));
+  );
 
   authService = AuthService();
   // ✅ Was unawaited — awaited now so isLoggedIn/userId are reliably known
@@ -4139,7 +4143,7 @@ Future<void> main() async {
   // ✅ Platform-specific push init: web uses VAPID + service worker +
   // browser Notification API; mobile uses FCM's native background handler
   // + flutter_local_notifications for foreground display.
-    unawaited(() async {
+  unawaited(() async {
     try {
       await initializeDeepLinks();
     } catch (e) {
