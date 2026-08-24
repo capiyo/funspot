@@ -4139,16 +4139,21 @@ Future<void> main() async {
   // ✅ Platform-specific push init: web uses VAPID + service worker +
   // browser Notification API; mobile uses FCM's native background handler
   // + flutter_local_notifications for foreground display.
-  unawaited(() async {
+    unawaited(() async {
     try {
       await initializeDeepLinks();
+    } catch (e) {
+      developer.log('❌ Deep link init error: $e', name: 'Funzypp');
+    }
+
+    try {
       if (kIsWeb) {
         await initializeFCMWeb();
       } else {
         await initializeFCM();
       }
     } catch (e) {
-      developer.log('❌ Post-launch init error: $e', name: 'Funzypp');
+      developer.log('❌ FCM init error: $e', name: 'Funzypp');
     }
   }());
 
