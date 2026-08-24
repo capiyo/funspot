@@ -214,6 +214,13 @@ class _HomePageWebState extends State<HomePageWeb> {
         });
         _savePendingJoinRequests();
       }
+    }
+     else if (type == 'comment_badge_update') {
+      final total = event['total_unread_comments'] as int? ?? 0;
+      setState(() {
+        _notificationCount = total;
+        _hasUnreadNotifications = total > 0;
+      });
     } else if (type == 'notification_badge_update') {
       final total = event['total_unread_notifications'] as int? ?? 0;
       setState(() {

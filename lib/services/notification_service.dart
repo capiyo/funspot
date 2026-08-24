@@ -192,10 +192,8 @@ class NotificationService {
       // ─── EXISTING HANDLERS FOR VOTE/COMMENT NOTIFICATIONS ────────────────
 
       // Guard clause - exit if required fields are missing
-      if (notificationType == null || fixtureId == null) {
-        debugPrint(
-          '[NotificationService] ⚠️ Missing notificationType or fixture_id',
-        );
+     if (notificationType == null) {
+        debugPrint('[NotificationService] ⚠️ Missing notificationType');
         return;
       }
 
@@ -205,9 +203,12 @@ class NotificationService {
       final isCommentNotification = notificationType == 'fixture_comment' ||
           notificationType == 'fixture_comment_push';
 
-      if (isVoteNotification || isCommentNotification) {
-        // Save unread notification to local storage
-        await _saveUnreadNotification(fixtureId, notificationType, data);
+     if (isVoteNotification || isCommentNotification) {
+  if (fixtureId == null) {
+    debugPrint('[NotificationService] ⚠️ Missing fixture_id for vote/comment notification');
+    return;
+  }
+  await _saveUnreadNotification(fixtureId, notificationType, data);
 
         // Update comment badge count (for Funzy tab)
         final newCommentCount = await _incrementUnreadCommentCount();
