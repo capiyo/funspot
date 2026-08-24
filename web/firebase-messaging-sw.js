@@ -4,14 +4,18 @@ importScripts('https://www.gstatic.com/firebasejs/10.7.0/firebase-messaging-comp
 // Use the SAME values as the `web` block in your firebase_options.dart
 firebase.initializeApp({
   apiKey: 'AIzaSyCWMGz6AIRXgu7GVZiJWlkvO6tVZADf5tY',
-  authDomain: 'funzy-d56d7.firebaseapp.com' ,
+  authDomain: 'funzy-d56d7.firebaseapp.com',
   projectId: 'funzy-d56d7',
   storageBucket: 'funzy-d56d7.firebasestorage.app',
   messagingSenderId: '661929781606',
   appId: '1:661929781606:web:3f306a659ae64ac7f780a7',
 });
 
-
+// ✅ ADDED — this was missing. Without it, `messaging` below is undefined
+// and the service worker throws `ReferenceError: messaging is not defined`
+// the moment it tries to register the background handler, silently
+// breaking all background/closed-tab push notifications.
+const messaging = firebase.messaging();
 
 // Handles messages when the TAB IS NOT FOCUSED / CLOSED
 messaging.onBackgroundMessage((payload) => {

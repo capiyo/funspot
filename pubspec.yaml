@@ -24,9 +24,14 @@ dependencies:
   flutter_native_splash: ^2.4.0
 
   # Firebase
-  firebase_core: ^4.11.0
+  # Pinned to Google's officially tested BoM pairing (v4.9.0, Feb 2026) —
+  # NOT caret ranges — because caret ranges let pub resolve to newer,
+  # untested combinations of firebase_core / firebase_messaging /
+  # firebase_core_web / firebase_messaging_web, which triggered a
+  # JS/Dart interop TypeError inside requestPermission() on web.
+  firebase_core: 4.4.0
   firebase_auth: ^6.5.4
-  firebase_messaging: ^16.4.1
+  firebase_messaging: 16.1.1
 
   # Networking
   http: ^1.2.0
