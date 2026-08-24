@@ -3809,39 +3809,54 @@ Future<void> _showJoinChannelDialog(String inviteCode) async {
 // ============================================================================
 
 
+
 Future<void> initializeFCMWeb() async {
+  debugPrint('FCM DEBUG: initializeFCMWeb() entered');
   try {
     developer.log('🔔 Initializing FCM (web)…', name: 'Funzypp');
 
     await WebNotificationService.requestPermission();
+    debugPrint('FCM DEBUG: WebNotificationService.requestPermission() done');
 
     final settings = await FirebaseMessaging.instance.requestPermission();
+    debugPrint('FCM DEBUG: requestPermission() -> ${settings.authorizationStatus}');
+
     if (settings.authorizationStatus != AuthorizationStatus.authorized) {
+      debugPrint('FCM DEBUG: permission NOT authorized, aborting');
       developer.log('⚠️ FCM permission denied (web)', name: 'Funzypp');
       return;
     }
 
+    debugPrint('FCM DEBUG: about to call getToken()');
     // Web requires the VAPID key to get a token.
     final token = await FirebaseMessaging.instance.getToken(
       vapidKey: 'BIvcsdfnoQ07A2PAEiXvHfjLPOfyga-fiPB-JLJfdr7NbXxwWJMr6fNT-71RzUVP-WZcL76W_sN137Fs9wMhi90',
     );
+    debugPrint('FCM DEBUG: getToken() returned -> ${token == null ? "NULL" : "token acquired (len=${token.length})"}');
 
     if (token != null) {
       developer.log('📱 Web FCM Token acquired', name: 'Funzypp');
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('fcm_token', token);
 
+      debugPrint('FCM DEBUG: isLoggedIn=${authService.isLoggedIn}, userId=${authService.userId}');
+
       if (authService.isLoggedIn && authService.userId != null) {
+        debugPrint('FCM DEBUG: calling NotificationService.registerToken()');
         await NotificationService.registerToken(
           userId: authService.userId!,
           fcmToken: token,
           platform: 'web',
           authToken: authService.authToken,
         );
+        debugPrint('FCM DEBUG: registerToken() call completed');
+      } else {
+        debugPrint('FCM DEBUG: skipped registerToken() — not logged in yet');
       }
     }
 
     FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {
+      debugPrint('FCM DEBUG: onTokenRefresh fired');
       SharedPreferences.getInstance().then((prefs) {
         prefs.setString('fcm_token', newToken);
       });
@@ -3857,6 +3872,7 @@ Future<void> initializeFCMWeb() async {
 
     // Foreground messages — tab is open and focused.
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      debugPrint('FCM DEBUG: onMessage (foreground) fired');
       developer.log('🔔 Foreground FCM message (web)', name: 'Funzypp');
       final payload = _buildPayload(message);
 
@@ -3879,45 +3895,47 @@ Future<void> initializeFCMWeb() async {
     });
 
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      debugPrint('FCM DEBUG: onMessageOpenedApp fired');
       _handleNotificationClick(message.data);
     });
-  } catch (e) {
+
+    debugPrint('FCM DEBUG: initializeFCMWeb() completed successfully');
+  } catch (e, st) {
+    debugPrint('FCM DEBUG: initializeFCMWeb() THREW -> $e');
+    debugPrint('FCM DEBUG: stack trace -> $st');
     developer.log('❌ FCM web initialization error: $e', name: 'Funzypp');
   }
 }
 
-
-
-
-
-
-
-
-
-
 Future<void> initializeFCM() async {
+  debugPrint('FCM DEBUG: initializeFCM() entered (native)');
   try {
     developer.log('🔔 Initializing FCM…', name: 'Funzypp');
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
-    // ✅ Set up local notifications BEFORE we start listening for messages,
-    // so onMessage never fires before the plugin is ready to show anything.
     await LocalNotificationService.initialize(
       onTap: (payload) {
         if (payload == null || payload.isEmpty) return;
         _handleNotificationClick({'type': payload});
       },
     );
+    debugPrint('FCM DEBUG: LocalNotificationService.initialize() done');
 
     final settings = await FirebaseMessaging.instance.requestPermission();
+    debugPrint('FCM DEBUG: requestPermission() -> ${settings.authorizationStatus}');
+
     if (settings.authorizationStatus != AuthorizationStatus.authorized) {
+      debugPrint('FCM DEBUG: permission NOT authorized, aborting');
       developer.log('⚠️ FCM permission denied', name: 'Funzypp');
       return;
     }
 
     developer.log('✅ FCM permissions granted', name: 'Funzypp');
 
+    debugPrint('FCM DEBUG: about to call getToken()');
     final token = await FirebaseMessaging.instance.getToken();
+    debugPrint('FCM DEBUG: getToken() returned -> ${token == null ? "NULL" : "token acquired (len=${token.length})"}');
+
     if (token != null) {
       developer.log(
         '📱 FCM Token: ${token.substring(0, token.length > 20 ? 20 : token.length)}…',
@@ -3926,27 +3944,30 @@ Future<void> initializeFCM() async {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('fcm_token', token);
 
-      // ✅ Register immediately using the token we just got — don't rely on
-      // a later SharedPreferences read, which races against HomePage's
-      // initState() reading 'fcm_token' before this write ever lands.
+      debugPrint('FCM DEBUG: isLoggedIn=${authService.isLoggedIn}, userId=${authService.userId}');
+
       if (authService.isLoggedIn && authService.userId != null) {
         final platform = Platform.isIOS ? 'ios' : 'android';
+        debugPrint('FCM DEBUG: calling registerToken() platform=$platform');
         await NotificationService.registerToken(
           userId: authService.userId!,
           fcmToken: token,
           platform: platform,
           authToken: authService.authToken,
         );
+        debugPrint('FCM DEBUG: registerToken() call completed');
+      } else {
+        debugPrint('FCM DEBUG: skipped registerToken() — not logged in yet');
       }
     }
 
     FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {
+      debugPrint('FCM DEBUG: onTokenRefresh fired');
       developer.log('🔄 FCM Token refreshed', name: 'Funzypp');
       SharedPreferences.getInstance().then((prefs) {
         prefs.setString('fcm_token', newToken);
       });
 
-      // ✅ Re-register on refresh too, same reasoning.
       if (authService.isLoggedIn && authService.userId != null) {
         final platform = Platform.isIOS ? 'ios' : 'android';
         NotificationService.registerToken(
@@ -3959,11 +3980,10 @@ Future<void> initializeFCM() async {
     });
 
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      debugPrint('FCM DEBUG: onMessage (foreground) fired');
       developer.log('🔔 Foreground FCM message', name: 'Funzypp');
       final payload = _buildPayload(message);
 
-      // ✅ Show a real system-tray notification even while foregrounded —
-      // Firebase never does this automatically when the app is in front.
       LocalNotificationService.show(message);
 
       if (payload['type'] == 'comrade_added') {
@@ -3989,12 +4009,14 @@ Future<void> initializeFCM() async {
     });
 
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      debugPrint('FCM DEBUG: onMessageOpenedApp fired');
       developer.log('🔔 App resumed from notification tap', name: 'Funzypp');
       _handleNotificationClick(message.data);
     });
 
     final initialMessage = await FirebaseMessaging.instance.getInitialMessage();
     if (initialMessage != null) {
+      debugPrint('FCM DEBUG: launched from terminated state via notification');
       developer.log(
         '🔔 App launched from terminated state via notification',
         name: 'Funzypp',
@@ -4004,10 +4026,26 @@ Future<void> initializeFCM() async {
         () => _handleNotificationClick(initialMessage.data),
       );
     }
-  } catch (e) {
+
+    debugPrint('FCM DEBUG: initializeFCM() completed successfully');
+  } catch (e, st) {
+    debugPrint('FCM DEBUG: initializeFCM() THREW -> $e');
+    debugPrint('FCM DEBUG: stack trace -> $st');
     developer.log('❌ FCM initialization error: $e', name: 'Funzypp');
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+
 
 Map<String, dynamic> _buildPayload(RemoteMessage message) {
   final type =
