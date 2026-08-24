@@ -29,8 +29,12 @@ dependencies:
   # untested combinations of firebase_core / firebase_messaging /
   # firebase_core_web / firebase_messaging_web, which triggered a
   # JS/Dart interop TypeError inside requestPermission() on web.
+ 
+
+
+
   firebase_core: 4.4.0
-  firebase_auth: ^6.5.4
+  firebase_auth: 6.1.4
   firebase_messaging: 16.1.1
 
   # Networking
