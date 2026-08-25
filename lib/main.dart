@@ -4278,6 +4278,30 @@ class _FunzyppState extends State<Funzypp> with WidgetsBindingObserver {
           startAppCacheRefresh();
         }
         break;
+        case AppLifecycleState.resumed:
+        _backgroundTeardownTimer?.cancel();
+        _backgroundTeardownTimer = null;
+
+        if (_isBackground) {
+          _isBackground = false;
+          MemoryManager().onForeground();
+          startAppCacheRefresh();
+        }
+
+        // ✅ NEW — reconcile with the server on every resume, so counts
+        // recover even if a push was missed entirely while backgrounded.
+        if (_isLoggedIn && _userId != null) {
+          final adminChannelIds = AppCache.channels
+              .where((c) => c.isAdmin)
+              .map((c) => c.channelId)
+              .toList();
+          NotificationService.reconcileFromServer(
+            userId: _userId!,
+            authToken: _authService.authToken,
+            adminChannelIds: adminChannelIds,
+          );
+        }
+        break;
 
       case AppLifecycleState.paused:
         _backgroundTeardownTimer?.cancel();

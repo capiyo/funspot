@@ -44,6 +44,7 @@ class _HomePageWebState extends State<HomePageWeb> {
   int _notificationCount = 0;
   int _pendingJoinCount = 0;
   Set<String> _pendingJoinRequests = {};
+  Timer? _badgePollTimer;
 
   final PageController _arenaPageController = PageController();
   final PageController _feedPageController = PageController();
@@ -81,6 +82,7 @@ class _HomePageWebState extends State<HomePageWeb> {
     _loadPendingJoinRequests();
     _loadStoredNotifications();
     _subscribeToNotifications();
+    _startBadgePolling();
   }
 
   @override
@@ -88,6 +90,7 @@ class _HomePageWebState extends State<HomePageWeb> {
     _authService.removeListener(_onAuthStateChanged);
     _notificationSubscription?.cancel();
     _badgeStreamSubscription?.cancel();
+     _badgePollTimer?.cancel();
     super.dispose();
   }
 
@@ -99,6 +102,21 @@ class _HomePageWebState extends State<HomePageWeb> {
       _loadAllData();
       _loadPendingJoinRequests();
     }
+  }
+    void _startBadgePolling() {
+    _badgePollTimer?.cancel();
+    _badgePollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (!mounted || !_isLoggedIn) return;
+      final adminChannelIds = _userChannels
+          .where((c) => c.isAdmin)
+          .map((c) => c.channelId)
+          .toList();
+      NotificationService.reconcileFromServer(
+        userId: _authService.userId ?? '',
+        authToken: _authService.authToken,
+        adminChannelIds: adminChannelIds,
+      );
+    });
   }
 
   // ==========================================================================
@@ -187,6 +205,7 @@ class _HomePageWebState extends State<HomePageWeb> {
       'isUnread': true,
     });
   }
+  
 
     void _handleBadgeUpdate(Map<String, dynamic> event) {
     if (!mounted) return;
@@ -203,7 +222,14 @@ class _HomePageWebState extends State<HomePageWeb> {
         });
         _savePendingJoinRequests();
       }
-    } else if (type == 'join_approved' || type == 'join_rejected') {
+    } else if (type == 'pending_join_count_sync') {
+  final total = event['total_pending_joins'] as int? ?? 0;
+  setState(() {
+    _pendingJoinCount = total;
+  });
+}
+    
+     else if (type == 'join_approved' || type == 'join_rejected') {
       final channelId = event['channel_id']?.toString() ?? '';
       if (channelId.isNotEmpty) {
         setState(() {

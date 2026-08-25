@@ -301,7 +301,149 @@ class NotificationService {
       debugPrint('[NotificationService] ❌ Badge update error: $e');
     }
   }
+  // ─── Reconcile with server (call on resume / tab focus) ────────────────────
+  /// Pulls the true current state from the backend and corrects local
+  /// caches + emits badge updates. This is the fix for missed background
+  /// pushes (the common Android-web case): instead of only ever moving
+  /// counters via live FCM events, this asks the server what's actually
+  /// true and pushes real numbers onto the same badgeStream your UI
+  /// already listens to.
+  static Future<void> reconcileFromServer({
+    required String userId,
+    String? authToken,
+    List<String> adminChannelIds = const [],
+  }) async {
+    try {
+      debugPrint(
+          '[NotificationService] 🔄 Reconciling with server for $userId');
 
+      final headers = {'Content-Type': 'application/json'};
+      if (authToken != null && authToken.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $authToken';
+      }
+
+      final results = await Future.wait([
+        _fetchUnreadSummary(userId, headers),
+        _fetchTruePendingJoinCount(adminChannelIds, headers),
+      ]);
+
+      final unreadSummary = results[0] as Map<String, int>?;
+      final truePendingCount = results[1] as int?;
+
+      if (unreadSummary != null) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setInt(
+            _unreadCountKey, unreadSummary['notifications'] ?? 0);
+        await prefs.setInt(
+            _unreadCommentCountKey, unreadSummary['comments'] ?? 0);
+
+        if (!_badgeStreamController.isClosed) {
+          _badgeStreamController.add({
+            'type': 'notification_badge_update',
+            'total_unread_notifications': unreadSummary['notifications'] ?? 0,
+          });
+          _badgeStreamController.add({
+            'type': 'comment_badge_update',
+            'total_unread_comments': unreadSummary['comments'] ?? 0,
+          });
+        }
+
+        debugPrint(
+          '[NotificationService] ✅ Reconciled: notifications='
+          '${unreadSummary['notifications']}, comments=${unreadSummary['comments']}',
+        );
+      } else {
+        debugPrint(
+          '[NotificationService] ⏭️ Skipped notification reconcile (fetch failed, kept local state)',
+        );
+      }
+
+      if (truePendingCount != null && !_badgeStreamController.isClosed) {
+        // Absolute value, not a delta — this is a sync event, distinct
+        // from the increment/decrement events pushToStream() already emits.
+        _badgeStreamController.add({
+          'type': 'pending_join_count_sync',
+          'total_pending_joins': truePendingCount,
+        });
+        debugPrint(
+          '[NotificationService] ✅ Reconciled pending joins: $truePendingCount',
+        );
+      }
+    } catch (e) {
+      debugPrint('[NotificationService] ❌ reconcileFromServer error: $e');
+    }
+  }
+
+  /// Hits a backend unread-summary endpoint. Returns null (not 0) on any
+  /// failure so callers never overwrite good local state with a zero from
+  /// a transient network error or a 404.
+  ///
+  /// ⚠️ Assumes GET /notifications/unread-summary/:userId returning
+  /// {"notifications": n, "comments": n}. Add that route on the Rust side
+  /// if it doesn't exist yet — this is the piece with no existing
+  /// equivalent anywhere else in the app.
+  static Future<Map<String, int>?> _fetchUnreadSummary(
+    String userId,
+    Map<String, String> headers,
+  ) async {
+    try {
+      final response = await http
+          .get(
+            Uri.parse('$API_BASE_URL/notifications/unread-summary/$userId'),
+            headers: headers,
+          )
+          .timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return {
+          'notifications': (data['notifications'] as num?)?.toInt() ?? 0,
+          'comments': (data['comments'] as num?)?.toInt() ?? 0,
+        };
+      }
+
+      debugPrint(
+        '[NotificationService] ⚠️ unread-summary failed: ${response.statusCode}',
+      );
+      return null;
+    } catch (e) {
+      debugPrint('[NotificationService] ❌ _fetchUnreadSummary error: $e');
+      return null;
+    }
+  }
+
+  /// Sums real pending-join-request counts across every channel the user
+  /// admins, using the same per-channel endpoint PendingRequestsModal
+  /// already calls — no new backend route needed for this part.
+  static Future<int?> _fetchTruePendingJoinCount(
+    List<String> adminChannelIds,
+    Map<String, String> headers,
+  ) async {
+    if (adminChannelIds.isEmpty) return 0;
+
+    try {
+      int total = 0;
+      for (final channelId in adminChannelIds) {
+        final response = await http
+            .get(
+              Uri.parse('$API_BASE_URL/channels/$channelId/pending-requests'),
+              headers: headers,
+            )
+            .timeout(const Duration(seconds: 10));
+
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          final List<dynamic> requests = data['pending_requests'] ?? [];
+          total += requests.length;
+        }
+      }
+      return total;
+    } catch (e) {
+      debugPrint(
+          '[NotificationService] ❌ _fetchTruePendingJoinCount error: $e');
+      return null;
+    }
+  }
   /// Returns 'granted' | 'denied' | 'default' on web, 'unsupported' elsewhere.
   static String getPermissionStatus() {
     if (!kIsWeb) return 'unsupported';
