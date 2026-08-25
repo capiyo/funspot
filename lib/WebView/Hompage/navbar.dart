@@ -183,7 +183,7 @@ class WebNavbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 52, // slimmer bar (was 68)
+      height: 36, // slim — hugs the text line (was 52)
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           begin: Alignment.centerLeft,
@@ -204,16 +204,16 @@ class WebNavbar extends StatelessWidget {
           ),
         ),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 16), // was 24
+      padding: const EdgeInsets.symmetric(horizontal: 12), // was 16
       child: Row(
         children: [
           // 1. App name / logo
           _buildLogo(),
-          const SizedBox(width: 14),
+          const SizedBox(width: 10), // was 14
 
           if (isLoggedIn && _hasProfileInfo) ...[
             _buildProfileInfo(),
-            const SizedBox(width: 14),
+            const SizedBox(width: 10), // was 14
           ],
 
           // 2. All-channels carousel — sized to its content (not stretched
@@ -241,7 +241,7 @@ class WebNavbar extends StatelessWidget {
 
           // 3. Search bar
           _buildSearch(),
-          const SizedBox(width: 12),
+          const SizedBox(width: 8), // was 12
 
           // 4. The user's own joined channels — capped so it can never
           //    push notification/avatar off-screen; scrolls internally.
@@ -249,10 +249,10 @@ class WebNavbar extends StatelessWidget {
             constraints: const BoxConstraints(maxWidth: 260),
             child: _buildUserChannels(context),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 8), // was 12
 
           _buildNotificationIcon(),
-          const SizedBox(width: 12),
+          const SizedBox(width: 8), // was 12
           _buildAvatar(),
         ],
       ),
@@ -279,8 +279,8 @@ class WebNavbar extends StatelessWidget {
     return Row(
       children: [
         Container(
-          width: 32, // was 42
-          height: 32,
+          width: 24, // was 32
+          height: 24,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             border: Border.all(
@@ -292,20 +292,20 @@ class WebNavbar extends StatelessWidget {
             child: Container(
               color: const Color(0xFF0B3D2E),
               padding: const EdgeInsets.all(
-                  5), // small inset so the mark doesn't touch the ring
+                  3), // small inset so the mark doesn't touch the ring
               child: Image.asset(
                 'assets/icons/funspot.png',
                 fit: BoxFit.contain,
                 errorBuilder: (context, error, stackTrace) => const Icon(
                   Icons.sports_soccer,
                   color: Color(0xFF34D399),
-                  size: 18,
+                  size: 14,
                 ),
               ),
             ),
           ),
         ),
-        const SizedBox(width: 10), // was 12
+        const SizedBox(width: 8), // was 10
         ShaderMask(
           shaderCallback: (bounds) => const LinearGradient(
             colors: [Colors.white, Color(0xFFDFF7EA)],
@@ -313,16 +313,17 @@ class WebNavbar extends StatelessWidget {
           child: const Text(
             'Funspot',
             style: TextStyle(
-              fontSize: 16, // was 21
+              fontSize: 14, // was 16
               fontWeight: FontWeight.w800,
               color: Colors.white,
               letterSpacing: -0.4,
+              height: 1, // no extra line-height above/below glyphs
             ),
           ),
         ),
         Container(
-          margin: const EdgeInsets.only(left: 6),
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          margin: const EdgeInsets.only(left: 5),
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
           decoration: BoxDecoration(
             gradient: const LinearGradient(
               colors: FunspotGradients.gold,
@@ -338,10 +339,11 @@ class WebNavbar extends StatelessWidget {
           child: const Text(
             'BETA',
             style: TextStyle(
-              fontSize: 7, // was 8
+              fontSize: 7,
               fontWeight: FontWeight.w800,
               color: Color(0xFF0B3D2E),
               letterSpacing: 1,
+              height: 1,
             ),
           ),
         ),
@@ -355,10 +357,10 @@ class WebNavbar extends StatelessWidget {
   Widget _buildProfileInfo() {
     return Container(
       padding:
-          const EdgeInsets.symmetric(horizontal: 12, vertical: 5), // was 14/8
+          const EdgeInsets.symmetric(horizontal: 10, vertical: 2), // was 12/5
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(
           color: Colors.white.withValues(alpha: 0.14),
           width: 0.7,
@@ -398,16 +400,17 @@ class WebNavbar extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 11, color: const Color(0xFF6EE7B7)), // was 13
+        Icon(icon, size: 10, color: const Color(0xFF6EE7B7)), // was 11
         const SizedBox(width: 4),
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 100),
           child: Text(
             value,
             style: const TextStyle(
-              fontSize: 11, // was 12
+              fontSize: 11,
               fontWeight: FontWeight.w600,
               color: Colors.white,
+              height: 1,
             ),
             overflow: TextOverflow.ellipsis,
             maxLines: 1,
@@ -421,7 +424,7 @@ class WebNavbar extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 8),
       width: 1,
-      height: 12,
+      height: 10, // was 12
       color: Colors.white.withValues(alpha: 0.18),
     );
   }
@@ -443,6 +446,7 @@ class WebNavbar extends StatelessWidget {
             style: FanTypography.caption.copyWith(
               color: Colors.white.withValues(alpha: 0.7),
               fontSize: 11,
+              height: 1,
             ),
           ),
           const SizedBox(width: 6),
@@ -480,8 +484,7 @@ class WebNavbar extends StatelessWidget {
     final leader = sortedMembers.isNotEmpty ? sortedMembers.first : null;
 
     return Container(
-      padding:
-          const EdgeInsets.symmetric(horizontal: 2, vertical: 2), // was 4/4
+      padding: EdgeInsets.zero, // was 2/2 — no extra chrome around the chip
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -496,15 +499,16 @@ class WebNavbar extends StatelessWidget {
               onChannelSelected(channel);
               onOpenChat?.call(channel);
             },
-            borderRadius: BorderRadius.circular(8),
-            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 4),
+            borderRadius: BorderRadius.circular(6),
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
             child: Text(
               channel.name,
               style: TextStyle(
-                fontSize: 12, // was 13
+                fontSize: 12,
                 fontWeight: FontWeight.w600,
                 color: isSelected ? const Color(0xFF6EE7B7) : Colors.white,
                 decoration: isSelected ? TextDecoration.underline : null,
+                height: 1,
               ),
             ),
           ),
@@ -514,20 +518,21 @@ class WebNavbar extends StatelessWidget {
             const SizedBox(width: 4),
             _WebTappable(
               onTap: () => onOpenLeaderboard?.call(channel),
-              borderRadius: BorderRadius.circular(7),
-              padding: const EdgeInsets.symmetric(horizontal: 1, vertical: 1),
+              borderRadius: BorderRadius.circular(6),
+              padding: EdgeInsets.zero,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                 decoration: BoxDecoration(
                   gradient: const LinearGradient(colors: FunspotGradients.gold),
-                  borderRadius: BorderRadius.circular(7),
+                  borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
                   '${leader.username} (${leader.seasonPoints}pts)',
                   style: const TextStyle(
-                    fontSize: 9, // was 10
+                    fontSize: 9,
                     fontWeight: FontWeight.w700,
                     color: Color(0xFF0B3D2E),
+                    height: 1,
                   ),
                 ),
               ),
@@ -542,11 +547,11 @@ class WebNavbar extends StatelessWidget {
     // No cap anymore — always tappable.
     return _WebTappable(
       onTap: onCreateChannel,
-      borderRadius: BorderRadius.circular(18),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      borderRadius: BorderRadius.circular(14),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
       child: const Icon(
         Icons.add_rounded,
-        size: 15, // was 17
+        size: 14,
         color: Color(0xFF6EE7B7),
       ),
     );
@@ -557,11 +562,11 @@ class WebNavbar extends StatelessWidget {
   // ==========================================================================
   Widget _buildSearch() {
     return Container(
-      width: 180, // was 200
-      height: 32, // was 40
+      width: 150, // was 180
+      height: 24, // was 32 — just enough for the single text line
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(6),
         border: Border.all(
           color: Colors.white.withValues(alpha: 0.16),
           width: 0.7,
@@ -570,23 +575,28 @@ class WebNavbar extends StatelessWidget {
       child: TextField(
         style: const TextStyle(
           fontWeight: FontWeight.w600,
-          fontSize: 12, // was 13
+          fontSize: 12,
           color: Colors.white,
+          height: 1,
         ),
         decoration: InputDecoration(
+          isDense: true,
           hintText: 'Search...',
           hintStyle: TextStyle(
             color: Colors.white.withValues(alpha: 0.55),
             fontSize: 12,
             fontWeight: FontWeight.w500,
+            height: 1,
           ),
           prefixIcon: Icon(
             Icons.search,
-            size: 16, // was 18
+            size: 14,
             color: Colors.white.withValues(alpha: 0.6),
           ),
+          prefixIconConstraints:
+              const BoxConstraints(minWidth: 28, minHeight: 14),
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(vertical: 4), // was 8
+          contentPadding: const EdgeInsets.symmetric(vertical: 0),
         ),
       ),
     );
@@ -598,15 +608,14 @@ class WebNavbar extends StatelessWidget {
   Widget _buildNotificationIcon() {
     return _WebTappable(
       onTap: onNotificationTap,
-      borderRadius: BorderRadius.circular(18),
-      padding:
-          const EdgeInsets.all(4), // was 6, bigger hit area than the bare icon
+      borderRadius: BorderRadius.circular(14),
+      padding: EdgeInsets.zero, // was 4 — icon sits flush, no padding halo
       child: Stack(
         clipBehavior: Clip.none,
         children: [
           const Icon(
             Icons.notifications_none_outlined,
-            size: 20, // was 24
+            size: 18, // was 20
             color: Colors.white,
           ),
           if (notificationCount > 0)
@@ -624,8 +633,9 @@ class WebNavbar extends StatelessWidget {
                   notificationCount > 99 ? '99+' : notificationCount.toString(),
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 7, // was 8
+                    fontSize: 7,
                     fontWeight: FontWeight.w800,
+                    height: 1,
                   ),
                   textAlign: TextAlign.center,
                 ),
@@ -642,10 +652,10 @@ class WebNavbar extends StatelessWidget {
   Widget _buildAvatar() {
     return _WebTappable(
       onTap: onMenuTap,
-      borderRadius: BorderRadius.circular(17),
+      borderRadius: BorderRadius.circular(13),
       child: Container(
-        width: 34, // was 42
-        height: 34,
+        width: 26, // was 34 — matches the slimmer bar height
+        height: 26,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           border: Border.all(
@@ -658,16 +668,16 @@ class WebNavbar extends StatelessWidget {
               ? Image.network(
                   _avatarUrlFor(userId),
                   fit: BoxFit.cover,
-                  width: 34,
-                  height: 34,
+                  width: 26,
+                  height: 26,
                   loadingBuilder: (context, child, progress) {
                     if (progress == null) return child;
                     return Container(
                       color: const Color(0xFF0B3D2E),
                       child: const Center(
                         child: SizedBox(
-                          width: 14,
-                          height: 14,
+                          width: 12,
+                          height: 12,
                           child: CircularProgressIndicator(
                             strokeWidth: 1.5,
                             valueColor:
@@ -682,7 +692,7 @@ class WebNavbar extends StatelessWidget {
                     child: const Icon(
                       Icons.person_outline,
                       color: Colors.white,
-                      size: 16,
+                      size: 14,
                     ),
                   ),
                 )
@@ -691,7 +701,7 @@ class WebNavbar extends StatelessWidget {
                   child: const Icon(
                     Icons.person_outline,
                     color: Colors.white,
-                    size: 16,
+                    size: 14,
                   ),
                 ),
         ),
@@ -797,6 +807,7 @@ class _ChannelCarouselState extends State<_ChannelCarousel> {
         style: FanTypography.caption.copyWith(
           color: Colors.white.withValues(alpha: 0.7),
           fontSize: 11,
+          height: 1,
         ),
       );
     }
@@ -806,7 +817,7 @@ class _ChannelCarouselState extends State<_ChannelCarousel> {
     // the whole Row and left a visible dead gap when there weren't enough
     // channels to fill it.
     return SizedBox(
-      height: 32, // was 40
+      height: 24, // was 32 — just the text line
       child: ListView.builder(
         controller: _scrollController,
         scrollDirection: Axis.horizontal,
@@ -862,17 +873,17 @@ class _CarouselEntry extends StatelessWidget {
     // inked via _WebTappable so clicks/hover still register on web.
     return _WebTappable(
       onTap: onTap,
-      padding:
-          const EdgeInsets.symmetric(horizontal: 8, vertical: 6), // was 10/8
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
             channel.name,
             style: const TextStyle(
-              fontSize: 12, // was 13
+              fontSize: 12,
               fontWeight: FontWeight.w600,
               color: Colors.white,
+              height: 1,
             ),
           ),
           if (leader != null) ...[
@@ -882,9 +893,10 @@ class _CarouselEntry extends StatelessWidget {
             Text(
               leader.username,
               style: const TextStyle(
-                fontSize: 10, // was 11
+                fontSize: 10,
                 fontWeight: FontWeight.w600,
                 color: Color(0xFFFFE08A),
+                height: 1,
               ),
             ),
           ],
@@ -899,7 +911,7 @@ class _CarouselEntry extends StatelessWidget {
                 }
                 onJoin();
               },
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+              padding: EdgeInsets.zero,
               child: isJoining
                   ? const SizedBox(
                       width: 11,
@@ -912,10 +924,11 @@ class _CarouselEntry extends StatelessWidget {
                   : const Text(
                       'Join',
                       style: TextStyle(
-                        fontSize: 10, // was 11
+                        fontSize: 10,
                         fontWeight: FontWeight.w800,
                         color: Color(0xFF6EE7B7),
                         decoration: TextDecoration.underline,
+                        height: 1,
                       ),
                     ),
             ),
