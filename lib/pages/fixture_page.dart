@@ -14469,31 +14469,36 @@ void _loadDeferredData() {
     if (!_isDisposed && mounted) setState(fn);
   }
 
-  Future<Map<String, String>> _buildHeaders({bool forceRefresh = false}) async {
-    final headers = {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-    };
+ Future<Map<String, String>> _buildHeaders({bool forceRefresh = true}) async {
+  final headers = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+  };
 
-    if (widget.authToken != null && widget.authToken!.isNotEmpty) {
-      headers['Authorization'] = 'Bearer ${widget.authToken}';
-    } else {
-      final token = await LocalStorageManager.getAuthToken();
-      if (token != null && token.isNotEmpty) {
-        headers['Authorization'] = 'Bearer $token';
-      }
+  if (widget.authToken != null && widget.authToken!.isNotEmpty) {
+    headers['Authorization'] = 'Bearer ${widget.authToken}';
+  } else {
+    final token = await LocalStorageManager.getAuthToken();
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
     }
-
-    // ✅ IMPORTANT: When forceRefresh is true, add no-cache header
-    if (forceRefresh) {
-      headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
-      headers['Pragma'] = 'no-cache';
-    } else {
-      headers['Cache-Control'] = 'max-age=300';
-    }
-
-    return headers;
   }
+
+  // ✅ Default to no-cache. On Flutter Web, http requests go through the
+  // browser's fetch()/XHR layer and are subject to normal HTTP caching —
+  // without these headers the browser can silently return a stale cached
+  // response (e.g. a fixture the backend has already deleted) instead of
+  // hitting the network, even when app-level refresh logic correctly
+  // decides it's time to refetch.
+  if (forceRefresh) {
+    headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+    headers['Pragma'] = 'no-cache';
+  } else {
+    headers['Cache-Control'] = 'max-age=300';
+  }
+
+  return headers;
+}
 
   Future<void> _saveFixturesToCache(
     List<Fixture> fixtures, {
@@ -15037,110 +15042,106 @@ void _loadDeferredData() {
   // ============================================================
 // COMPLETE _fetchFixturesFromBackend METHOD
 // ============================================================
-  Future<void> _fetchFixturesFromBackend() async {
-    debugPrint('🌐 FETCHING FROM BACKEND API...');
+ Future<void> _fetchFixturesFromBackend() async {
+  debugPrint('🌐 FETCHING FROM BACKEND API...');
 
-    try {
-      final headers = await _buildHeaders(forceRefresh: true);
-      final response = await http
-          .get(
-            Uri.parse('$API_BASE_URL/games'),
-            headers: headers,
-          )
-          .timeout(REQUEST_TIMEOUT);
+  try {
+    final headers = await _buildHeaders(forceRefresh: true);
+    final response = await http
+        .get(
+          Uri.parse(
+            '$API_BASE_URL/games?_=${DateTime.now().millisecondsSinceEpoch}',
+          ),
+          headers: headers,
+        )
+        .timeout(REQUEST_TIMEOUT);
 
-      if (response.statusCode == 200) {
-        final jsonData = json.decode(response.body);
-        List<Fixture> fixtures = [];
+    if (response.statusCode == 200) {
+      final jsonData = json.decode(response.body);
+      List<Fixture> fixtures = [];
 
-        if (jsonData is Map<String, dynamic>) {
-          if (jsonData['success'] == true && jsonData['data'] is List) {
-            fixtures = _parseFixtures(jsonData['data'] as List);
-          } else if (jsonData.containsKey('fixtures') &&
-              jsonData['fixtures'] is List) {
-            fixtures = _parseFixtures(jsonData['fixtures'] as List);
-          }
-        } else if (jsonData is List) {
-          fixtures = _parseFixtures(jsonData);
+      if (jsonData is Map<String, dynamic>) {
+        if (jsonData['success'] == true && jsonData['data'] is List) {
+          fixtures = _parseFixtures(jsonData['data'] as List);
+        } else if (jsonData.containsKey('fixtures') &&
+            jsonData['fixtures'] is List) {
+          fixtures = _parseFixtures(jsonData['fixtures'] as List);
         }
-
-        // ✅ FILTER OUT COMPLETED GAMES
-        fixtures = fixtures
-            .where((f) => f.status != 'completed' && f.status != 'finished')
-            .toList();
-
-        if (fixtures.isNotEmpty) {
-          fixtures.sort((a, b) {
-            final aKey = '${a.dateIso}_${a.time}';
-            final bKey = '${b.dateIso}_${b.time}';
-            return aKey.compareTo(bKey);
-          });
-
-          _safeSetState(() {
-            _fixtures = fixtures;
-            _error = '';
-            _loading = false;
-          });
-
-          _saveToGlobalCache();
-          await _saveFixturesToCache(fixtures);
-
-          AppCache.fixtures = List.from(fixtures);
-          AppCache.notifyFixturesChanged();
-          await AppCache.saveFixtures(fixtures);
-
-          for (var fixture in fixtures) {
-            final fixtureId = fixture.matchId;
-            _commentControllers.putIfAbsent(
-                fixtureId, () => TextEditingController());
-            _showingRivals.putIfAbsent(fixtureId, () => false);
-            _showingSupporters.putIfAbsent(fixtureId, () => false);
-            _showingAllComments.putIfAbsent(fixtureId, () => false);
-          }
-
-          _ensureMockSubFixtures();
-
-          for (var fixture in fixtures) {
-            await _generateFeaturedCommentForFixture(fixture);
-          }
-
-          // ✅ REFRESH PLEDGE DATA - SILENTLY (NO TOASTS)
-          for (var fixture in fixtures) {
-            await _refreshPledgeDataForFixture(fixture.matchId);
-            // ✅ ALSO LOAD BETTORS (MATCHED BETS)
-            await _loadBettorsForFixture(fixture.matchId);
-          }
-
-          // ✅ FORCE REBUILD AFTER PLEDGES ARE LOADED
-          _safeSetState(() {});
-
-          if (_isUserLoggedIn() && _fixtures.isNotEmpty) {
-            final ws = WebSocketService();
-            if (ws.isConnected) {
-              // ✅ Socket was already connected before this refresh — the
-              // connectionStatus listener in _connectWebSocket() only fires
-              // once on transition to connected, so it never re-runs here.
-              // Any fixture that has newly become live since the last fetch
-              // needs to be (re)joined explicitly, or it silently gets zero
-              // commentary/chat pushes despite the socket being healthy.
-              _joinFixtureRooms();
-            } else {
-              _connectWebSocket();
-            }
-          }
-
-          unawaited(_fetchVotes());
-          unawaited(_fetchUserLikesFromBackend());
-          unawaited(_fetchAllComments(forceRefresh: true));
-          unawaited(_fetchSubFixtureVotesForAll());
-
-          _safeSetState(() {});
-        }
+      } else if (jsonData is List) {
+        fixtures = _parseFixtures(jsonData);
       }
-    } catch (e) {
-      ToastHelper.showError('❌ Error: ${e.toString()}');
+
+      // ✅ FILTER OUT COMPLETED GAMES
+      fixtures = fixtures
+          .where((f) => f.status != 'completed' && f.status != 'finished')
+          .toList();
+
+      if (fixtures.isNotEmpty) {
+        fixtures.sort((a, b) {
+          final aKey = '${a.dateIso}_${a.time}';
+          final bKey = '${b.dateIso}_${b.time}';
+          return aKey.compareTo(bKey);
+        });
+
+        _safeSetState(() {
+          _fixtures = fixtures;
+          _error = '';
+          _loading = false;
+        });
+
+        _saveToGlobalCache();
+        await _saveFixturesToCache(fixtures);
+
+        AppCache.fixtures = List.from(fixtures);
+        AppCache.notifyFixturesChanged();
+        await AppCache.saveFixtures(fixtures);
+
+        for (var fixture in fixtures) {
+          final fixtureId = fixture.matchId;
+          _commentControllers.putIfAbsent(
+              fixtureId, () => TextEditingController());
+          _showingRivals.putIfAbsent(fixtureId, () => false);
+          _showingSupporters.putIfAbsent(fixtureId, () => false);
+          _showingAllComments.putIfAbsent(fixtureId, () => false);
+        }
+
+        _ensureMockSubFixtures();
+
+        for (var fixture in fixtures) {
+          await _generateFeaturedCommentForFixture(fixture);
+        }
+
+        // ✅ REFRESH PLEDGE DATA - SILENTLY (NO TOASTS)
+        for (var fixture in fixtures) {
+          await _refreshPledgeDataForFixture(fixture.matchId);
+          // ✅ ALSO LOAD BETTORS (MATCHED BETS)
+          await _loadBettorsForFixture(fixture.matchId);
+        }
+
+        // ✅ FORCE REBUILD AFTER PLEDGES ARE LOADED
+        _safeSetState(() {});
+
+        if (_isUserLoggedIn() && _fixtures.isNotEmpty) {
+          final ws = WebSocketService();
+          if (ws.isConnected) {
+            _joinFixtureRooms();
+          } else {
+            _connectWebSocket();
+          }
+        }
+
+        unawaited(_fetchVotes());
+        unawaited(_fetchUserLikesFromBackend());
+        unawaited(_fetchAllComments(forceRefresh: true));
+        unawaited(_fetchSubFixtureVotesForAll());
+
+        _safeSetState(() {});
+      }
     }
+  } catch (e) {
+    ToastHelper.showError('❌ Error: ${e.toString()}');
   }
+}
 
 // Helper method to parse fixtures from JSON
   List<Fixture> _parseFixtures(List<dynamic> dataList) {

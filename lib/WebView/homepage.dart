@@ -188,7 +188,7 @@ class _HomePageWebState extends State<HomePageWeb> {
     });
   }
 
-  void _handleBadgeUpdate(Map<String, dynamic> event) {
+    void _handleBadgeUpdate(Map<String, dynamic> event) {
     if (!mounted) return;
 
     final type = event['type'] as String?;
@@ -214,13 +214,6 @@ class _HomePageWebState extends State<HomePageWeb> {
         });
         _savePendingJoinRequests();
       }
-    }
-     else if (type == 'comment_badge_update') {
-      final total = event['total_unread_comments'] as int? ?? 0;
-      setState(() {
-        _notificationCount = total;
-        _hasUnreadNotifications = total > 0;
-      });
     } else if (type == 'notification_badge_update') {
       final total = event['total_unread_notifications'] as int? ?? 0;
       setState(() {
@@ -231,6 +224,17 @@ class _HomePageWebState extends State<HomePageWeb> {
       setState(() {
         _notificationCount = 0;
         _hasUnreadNotifications = false;
+      });
+    } else if (type == 'comment_badge_update') {
+      // ✅ NEW — was missing entirely. NotificationService emits this type
+      // for vote_supporter/vote_rival/fixture_comment AND (after the fix
+      // above) vote.cast/pledge.create/bet.matched/bet.settled. Without
+      // this branch every one of those silently fell through and never
+      // touched _notificationCount, so the bell never moved for them.
+      final total = event['total_unread_comments'] as int? ?? 0;
+      setState(() {
+        _notificationCount = total;
+        _hasUnreadNotifications = total > 0;
       });
     }
   }

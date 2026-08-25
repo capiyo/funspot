@@ -23,7 +23,7 @@ messaging.onBackgroundMessage((payload) => {
   const body = payload.notification?.body || payload.data?.body || '';
   self.registration.showNotification(title, {
     body: body,
-    icon: '/icons/Icon-192.png',
+    icon: '/icons/funspot.png',
     data: payload.data,
   });
 });

@@ -12,6 +12,10 @@ class WebNotificationService {
         name: 'Funzypp');
   }
 
+  static String getPermissionStatus() {
+    return html.Notification.permission ?? 'default';
+  }
+
   static void show(RemoteMessage message) {
     if (!_permissionGranted) return;
 

@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'permission_status_stub.dart'
+    if (dart.library.html) 'permission_status_web.dart';
 
 class NotificationService {
   static const String API_BASE_URL = 'https://clash-api-m5mr.onrender.com/api';
@@ -54,14 +56,33 @@ class NotificationService {
   /// Handle badge update when notification arrives
   static Future<void> _handleBadgeUpdate(Map<String, dynamic> payload) async {
     try {
-      final data = payload['data'] as Map<String, dynamic>? ?? payload;
+      final rawData = payload['data'] as Map<String, dynamic>? ?? payload;
+
+      Map<String, dynamic> data = rawData;
+      final nested = rawData['data'];
+      if (nested is String && nested.isNotEmpty) {
+        try {
+          final decoded = json.decode(nested);
+          if (decoded is Map<String, dynamic>) {
+            data = {...rawData, ...decoded};
+          }
+        } catch (e) {
+          debugPrint(
+              '[NotificationService] ⚠️ Failed to decode nested data string: $e');
+        }
+      }
+
       final notificationType =
           data['notificationType'] as String? ?? data['type'] as String?;
       final fixtureId = data['fixture_id'] as String?;
 
+      if (notificationType == null) {
+        debugPrint('[NotificationService] ⚠️ Missing notificationType');
+        return;
+      }
+
       // ─── HANDLE JOIN REQUEST NOTIFICATIONS ────────────────────────────────
       if (notificationType == 'join_request') {
-        // Admin receives join request
         final channelId = data['channel_id'] as String?;
         final channelName = data['channel_name'] as String?;
         final userId = data['user_id'] as String?;
@@ -72,7 +93,6 @@ class NotificationService {
           '[NotificationService] 📥 Join request from $username for channel $channelName',
         );
 
-        // Save pending request to local storage
         await _savePendingJoinRequest(
           channelId: channelId ?? '',
           channelName: channelName ?? 'Unknown Channel',
@@ -82,7 +102,6 @@ class NotificationService {
           timestamp: DateTime.now().millisecondsSinceEpoch,
         );
 
-        // Notify join request stream (for admin dashboard)
         if (!_joinRequestStreamController.isClosed) {
           _joinRequestStreamController.add({
             'type': 'join_request',
@@ -95,7 +114,6 @@ class NotificationService {
           });
         }
 
-        // Also update notification badge for admin
         final newNotificationCount = await _incrementUnreadCount();
         if (!_badgeStreamController.isClosed) {
           _badgeStreamController.add({
@@ -108,12 +126,11 @@ class NotificationService {
         debugPrint(
           '[NotificationService] 🔴 Join request notification processed for channel $channelName',
         );
-        return; // Exit early after handling join request
+        return;
       }
 
       // ─── HANDLE JOIN APPROVED NOTIFICATIONS ──────────────────────────────
       if (notificationType == 'join_approved') {
-        // User receives approval
         final channelId = data['channel_id'] as String?;
         final channelName = data['channel_name'] as String?;
         final action = data['action'] as String?;
@@ -122,12 +139,10 @@ class NotificationService {
           '[NotificationService] ✅ Join approved for channel $channelName',
         );
 
-        // Remove from pending requests
         if (channelId != null) {
           await _removePendingJoinRequest(channelId);
         }
 
-        // Notify badge stream
         if (!_badgeStreamController.isClosed) {
           _badgeStreamController.add({
             'type': 'join_approved',
@@ -138,7 +153,6 @@ class NotificationService {
           });
         }
 
-        // Also add to notification stream for snackbar
         if (!_streamController.isClosed) {
           _streamController.add({
             'type': 'join_approved',
@@ -148,12 +162,11 @@ class NotificationService {
             'timestamp': DateTime.now().toIso8601String(),
           });
         }
-        return; // Exit early
+        return;
       }
 
       // ─── HANDLE JOIN REJECTED NOTIFICATIONS ──────────────────────────────
       if (notificationType == 'join_rejected') {
-        // User receives rejection
         final channelId = data['channel_id'] as String?;
         final channelName = data['channel_name'] as String?;
 
@@ -161,12 +174,10 @@ class NotificationService {
           '[NotificationService] ❌ Join rejected for channel $channelName',
         );
 
-        // Remove from pending requests
         if (channelId != null) {
           await _removePendingJoinRequest(channelId);
         }
 
-        // Notify badge stream
         if (!_badgeStreamController.isClosed) {
           _badgeStreamController.add({
             'type': 'join_rejected',
@@ -176,7 +187,6 @@ class NotificationService {
           });
         }
 
-        // Also add to notification stream for snackbar
         if (!_streamController.isClosed) {
           _streamController.add({
             'type': 'join_rejected',
@@ -186,34 +196,60 @@ class NotificationService {
             'timestamp': DateTime.now().toIso8601String(),
           });
         }
-        return; // Exit early
-      }
-
-      // ─── EXISTING HANDLERS FOR VOTE/COMMENT NOTIFICATIONS ────────────────
-
-      // Guard clause - exit if required fields are missing
-     if (notificationType == null) {
-        debugPrint('[NotificationService] ⚠️ Missing notificationType');
         return;
       }
 
-      // Check for vote/comment notification types
+      // ─── HANDLE VOTE / PLEDGE / BET NOTIFICATIONS (Rust dot-separated types) ──
+      if (notificationType == 'vote.cast' ||
+          notificationType == 'pledge.create' ||
+          notificationType == 'bet.matched' ||
+          notificationType == 'bet.settled') {
+        if (fixtureId == null) {
+          debugPrint(
+            '[NotificationService] ⚠️ Missing fixture_id for $notificationType',
+          );
+          return;
+        }
+
+        await _saveUnreadNotification(fixtureId, notificationType, data);
+
+        final newCommentCount = await _incrementUnreadCommentCount();
+
+        if (!_badgeStreamController.isClosed) {
+          _badgeStreamController.add({
+            'type': 'comment_badge_update',
+            'fixture_id': fixtureId,
+            'has_unread': true,
+            'total_unread_comments': newCommentCount,
+            'notification_type': notificationType,
+            'timestamp': DateTime.now().millisecondsSinceEpoch,
+          });
+        }
+
+        debugPrint(
+          '[NotificationService] 🔴 Badge updated for $notificationType on fixture $fixtureId, total: $newCommentCount',
+        );
+        return;
+      }
+
+      // ─── EXISTING HANDLERS FOR VOTE/COMMENT NOTIFICATIONS ────────────────
       final isVoteNotification = notificationType == 'vote_supporter' ||
           notificationType == 'vote_rival';
       final isCommentNotification = notificationType == 'fixture_comment' ||
           notificationType == 'fixture_comment_push';
 
-     if (isVoteNotification || isCommentNotification) {
-  if (fixtureId == null) {
-    debugPrint('[NotificationService] ⚠️ Missing fixture_id for vote/comment notification');
-    return;
-  }
-  await _saveUnreadNotification(fixtureId, notificationType, data);
+      if (isVoteNotification || isCommentNotification) {
+        if (fixtureId == null) {
+          debugPrint(
+            '[NotificationService] ⚠️ Missing fixture_id for vote/comment notification',
+          );
+          return;
+        }
 
-        // Update comment badge count (for Funzy tab)
+        await _saveUnreadNotification(fixtureId, notificationType, data);
+
         final newCommentCount = await _incrementUnreadCommentCount();
 
-        // Notify badge stream for Funzy tab
         if (!_badgeStreamController.isClosed) {
           _badgeStreamController.add({
             'type': 'comment_badge_update',
@@ -230,7 +266,6 @@ class NotificationService {
         );
       }
 
-      // Handle comrade added notifications (for feed tab)
       if (notificationType == 'comrade_added') {
         final newNotificationCount = await _incrementUnreadCount();
 
@@ -247,7 +282,6 @@ class NotificationService {
         );
       }
 
-      // Handle other notification types (likes, comments on posts)
       if (notificationType == 'like' || notificationType == 'post_comment') {
         final newNotificationCount = await _incrementUnreadCount();
 
@@ -268,11 +302,20 @@ class NotificationService {
     }
   }
 
+  /// Returns 'granted' | 'denied' | 'default' on web, 'unsupported' elsewhere.
+  static String getPermissionStatus() {
+    if (!kIsWeb) return 'unsupported';
+    try {
+      return getWebPermissionStatus();
+    } catch (e) {
+      return 'unsupported';
+    }
+  }
+
   // ========================================================================
   // JOIN REQUEST PENDING STORAGE METHODS
   // ========================================================================
 
-  /// Save a pending join request to local storage
   static Future<void> _savePendingJoinRequest({
     required String channelId,
     required String channelName,
@@ -290,7 +333,6 @@ class NotificationService {
         pendingRequests = json.decode(pendingJson);
       }
 
-      // Check if already exists
       final exists = pendingRequests.any(
         (req) => req['channel_id'] == channelId && req['user_id'] == userId,
       );
@@ -320,7 +362,6 @@ class NotificationService {
     }
   }
 
-  /// Get all pending join requests
   static Future<List<Map<String, dynamic>>> getPendingJoinRequests() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -335,7 +376,6 @@ class NotificationService {
     }
   }
 
-  /// Get pending join requests for a specific channel
   static Future<List<Map<String, dynamic>>> getPendingRequestsForChannel(
     String channelId,
   ) async {
@@ -349,7 +389,6 @@ class NotificationService {
     }
   }
 
-  /// Remove a pending join request (when approved or rejected)
   static Future<void> _removePendingJoinRequest(String channelId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -374,7 +413,6 @@ class NotificationService {
     }
   }
 
-  /// Remove a specific pending join request by request_id
   static Future<void> removePendingRequestById(String requestId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -399,7 +437,6 @@ class NotificationService {
     }
   }
 
-  /// Check if a user has a pending request for a channel
   static Future<bool> hasPendingRequest({
     required String channelId,
     required String userId,
@@ -414,7 +451,6 @@ class NotificationService {
     }
   }
 
-  /// Clear all pending join requests
   static Future<void> clearAllPendingRequests() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -429,7 +465,6 @@ class NotificationService {
   // EXISTING METHODS (unchanged)
   // ========================================================================
 
-  /// Save unread notification to local storage
   static Future<void> _saveUnreadNotification(
     String fixtureId,
     String notificationType,
@@ -464,7 +499,6 @@ class NotificationService {
       fixtureData['last_notification_time'] =
           DateTime.now().millisecondsSinceEpoch;
 
-      // Store last 10 notifications for this fixture
       List<dynamic> notifications = List.from(
         fixtureData['notification_data'] ?? [],
       );
@@ -487,7 +521,6 @@ class NotificationService {
     }
   }
 
-  /// Get unread status for a specific fixture
   static Future<bool> hasUnreadForFixture(String fixtureId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -501,7 +534,6 @@ class NotificationService {
     }
   }
 
-  /// Get unread count for a specific fixture
   static Future<int> getUnreadCountForFixture(String fixtureId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -519,7 +551,6 @@ class NotificationService {
     }
   }
 
-  /// Get all unread data with counts
   static Future<Map<String, Map<String, dynamic>>> getAllUnreadData() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -536,9 +567,7 @@ class NotificationService {
         final fixtureId = entry.key.toString();
         final data = entry.value as Map<String, dynamic>;
 
-        // Only include fixtures that have unread notifications
         if (data['has_unread'] == true) {
-          // Count how many unread notifications for this fixture
           final notificationData = data['notification_data'] as List? ?? [];
           final unreadCount = notificationData.length;
 
@@ -563,7 +592,6 @@ class NotificationService {
     }
   }
 
-  /// Get all unread fixture IDs (simplified version)
   static Future<List<String>> getAllUnreadFixtures() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -586,7 +614,6 @@ class NotificationService {
     }
   }
 
-  /// Get all unread fixtures with their notification types (detailed)
   static Future<Map<String, dynamic>> getAllUnreadFixturesWithDetails() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -620,7 +647,6 @@ class NotificationService {
     }
   }
 
-  /// Mark a fixture as read (when user views fixture comments)
   static Future<void> markFixtureAsRead(String fixtureId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -640,12 +666,10 @@ class NotificationService {
             json.encode(unreadMap),
           );
 
-          // Decrement total unread comment count by the number of notifications cleared
           for (int i = 0; i < count; i++) {
             await _decrementUnreadCommentCount();
           }
 
-          // Notify badge stream for Funzy tab
           if (!_badgeStreamController.isClosed) {
             _badgeStreamController.add({
               'type': 'comment_badge_cleared',
@@ -664,7 +688,6 @@ class NotificationService {
     }
   }
 
-  /// Mark all comment notifications as read (for Funzy tab)
   static Future<void> markAllCommentsAsRead() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -686,7 +709,6 @@ class NotificationService {
     }
   }
 
-  /// Mark all notifications as read (for feed tab)
   static Future<void> markAllNotificationsAsRead() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -707,7 +729,6 @@ class NotificationService {
     }
   }
 
-  /// Get total unread comment count (for Funzy tab)
   static Future<int> _getUnreadCommentCount() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -717,12 +738,10 @@ class NotificationService {
     }
   }
 
-  /// Get total unread comment count (public method)
   static Future<int> getTotalUnreadCommentCount() async {
     return await _getUnreadCommentCount();
   }
 
-  /// Get total unread notification count (for feed tab)
   static Future<int> _getUnreadCount() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -732,12 +751,10 @@ class NotificationService {
     }
   }
 
-  /// Get total unread notification count (public method)
   static Future<int> getTotalUnreadNotificationCount() async {
     return await _getUnreadCount();
   }
 
-  // Comment count methods
   static Future<int> _incrementUnreadCommentCount() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -762,7 +779,6 @@ class NotificationService {
     }
   }
 
-  // Notification count methods (for feed tab)
   static Future<int> _incrementUnreadCount() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -787,7 +803,6 @@ class NotificationService {
     }
   }
 
-  /// Mark fixture as unread (public method)
   static Future<void> markFixtureAsUnread(
     String fixtureId,
     String notificationType,
@@ -797,7 +812,6 @@ class NotificationService {
     await _incrementUnreadCommentCount();
   }
 
-  /// Clear all unread for a specific fixture (hard clear)
   static Future<void> clearUnreadForFixture(String fixtureId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -815,7 +829,6 @@ class NotificationService {
             json.encode(unreadMap),
           );
 
-          // Decrement total unread comment count
           for (int i = 0; i < count; i++) {
             await _decrementUnreadCommentCount();
           }
@@ -975,7 +988,6 @@ class NotificationService {
         'timestamp': DateTime.now().toIso8601String(),
       });
 
-      // Update notification badge (for feed tab)
       _incrementUnreadCount().then((newCount) {
         _badgeStreamController.add({
           'type': 'notification_badge_update',
@@ -1087,7 +1099,6 @@ class NotificationService {
     }
   }
 
-  /// Get total unread count (public method)
   static Future<int> getTotalUnreadCount() async {
     return await _getUnreadCount();
   }

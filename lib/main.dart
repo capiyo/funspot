@@ -21,6 +21,9 @@ import 'package:http/http.dart' as http;
 import 'models/comments_model.dart';
 import 'screens/home_page.dart';
 import 'services/notification_service.dart';
+import '../services/permission_status_stub.dart'
+    if (dart.library.html) 'permission_status_web.dart';
+
 import 'services/auth_service.dart';
 import 'services/memory_manager.dart';
 import 'models/fixture_models.dart';
@@ -242,73 +245,78 @@ class AppCache {
   // ==========================================================================
   // REFRESH HISTORY GAMES WITH COMMENTS - FIXED
   // ==========================================================================
-  static Future<void> refreshHistoryGamesWithComments(
-      {String? authToken}) async {
-    try {
+ static Future<void> refreshHistoryGamesWithComments(
+    {String? authToken}) async {
+  try {
+    if (kDebugMode) {
+      developer.log('🔄 Refreshing history games with comment preload...',
+          name: 'AppCache');
+    }
+
+    final headers = {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+    };
+    if (authToken != null && authToken.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $authToken';
+    }
+
+    final response = await http
+        .get(
+          Uri.parse(
+            'https://clash-api-m5mr.onrender.com/api/games/history?limit=100'
+            '&_=${DateTime.now().millisecondsSinceEpoch}',
+          ),
+          headers: headers,
+        )
+        .timeout(const Duration(seconds: 15));
+
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      final List<dynamic> gamesData = data['data'] ?? [];
+
+      historyGames = gamesData
+          .map((g) => HistoryGame.fromJson(g as Map<String, dynamic>))
+          .toList();
+
+      await _saveHistoryGamesToDisk(historyGames);
+      _historyController.add(historyGames);
+
+      // Preload comments for the first 5 games
+      final gamesToCache = historyGames.take(5).toList();
+      for (var game in gamesToCache) {
+        if (!_historyComments.containsKey(game.id)) {
+          unawaited(_fetchAndCacheHistoryComments(game.id, authToken));
+        }
+      }
+
       if (kDebugMode) {
-        developer.log('🔄 Refreshing history games with comment preload...',
+        developer.log(
+            '✅ Refreshed ${historyGames.length} history games, preloading comments for ${gamesToCache.length}',
             name: 'AppCache');
       }
-
-      final headers = {'Content-Type': 'application/json'};
-      if (authToken != null && authToken.isNotEmpty) {
-        headers['Authorization'] = 'Bearer $authToken';
+    } else {
+      if (kDebugMode) {
+        developer.log(
+            '⚠️ Failed to refresh history games: ${response.statusCode}',
+            name: 'AppCache');
       }
-
-      final response = await http
-          .get(
-            Uri.parse(
-                'https://clash-api-m5mr.onrender.com/api/games/history?limit=100'),
-            headers: headers,
-          )
-          .timeout(const Duration(seconds: 15));
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final List<dynamic> gamesData = data['data'] ?? [];
-
-        historyGames = gamesData
-            .map((g) => HistoryGame.fromJson(g as Map<String, dynamic>))
-            .toList();
-
-        await _saveHistoryGamesToDisk(historyGames);
-        _historyController.add(historyGames);
-
-        // Preload comments for the first 5 games
-        final gamesToCache = historyGames.take(5).toList();
-        for (var game in gamesToCache) {
-          if (!_historyComments.containsKey(game.id)) {
-            unawaited(_fetchAndCacheHistoryComments(game.id, authToken));
-          }
-        }
-
-        if (kDebugMode) {
-          developer.log(
-              '✅ Refreshed ${historyGames.length} history games, preloading comments for ${gamesToCache.length}',
-              name: 'AppCache');
-        }
-      } else {
-        if (kDebugMode) {
-          developer.log(
-              '⚠️ Failed to refresh history games: ${response.statusCode}',
-              name: 'AppCache');
-        }
-        final cached = await _loadHistoryGamesFromDisk();
-        if (cached != null) {
-          historyGames = cached;
-          _historyController.add(historyGames);
-        }
-      }
-    } catch (e) {
-      developer.log('❌ Failed to refresh history games: $e', name: 'AppCache');
       final cached = await _loadHistoryGamesFromDisk();
       if (cached != null) {
         historyGames = cached;
         _historyController.add(historyGames);
       }
     }
+  } catch (e) {
+    developer.log('❌ Failed to refresh history games: $e', name: 'AppCache');
+    final cached = await _loadHistoryGamesFromDisk();
+    if (cached != null) {
+      historyGames = cached;
+      _historyController.add(historyGames);
+    }
   }
-
+}
   static Future<void> _fetchAndCacheHistoryComments(
       String fixtureId, String? authToken) async {
     try {
@@ -1920,8 +1928,15 @@ class AppCache {
   static Future<void> refreshFixturesWithTime() async {
     try {
       final response = await http.get(
-        Uri.parse('https://clash-api-m5mr.onrender.com/api/games'),
-        headers: {'Content-Type': 'application/json'},
+        Uri.parse(
+          'https://clash-api-m5mr.onrender.com/api/games'
+          '?_=${DateTime.now().millisecondsSinceEpoch}',
+        ),
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+        },
       ).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
@@ -1987,129 +2002,140 @@ class AppCache {
   // REFRESH CHANNELS - DIFFED
   // ==========================================================================
   static Future<void> refreshChannels(String userId, String? authToken) async {
-    try {
-      final headers = {'Content-Type': 'application/json'};
-      if (authToken != null && authToken.isNotEmpty) {
-        headers['Authorization'] = 'Bearer $authToken';
-      }
+  try {
+    final headers = {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+    };
+    if (authToken != null && authToken.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $authToken';
+    }
 
-      final response = await http
-          .get(
-            Uri.parse(
-                'https://clash-api-m5mr.onrender.com/api/channels/user/$userId'),
-            headers: headers,
-          )
-          .timeout(const Duration(seconds: 10));
+    final response = await http
+        .get(
+          Uri.parse(
+            'https://clash-api-m5mr.onrender.com/api/channels/user/$userId'
+            '?_=${DateTime.now().millisecondsSinceEpoch}',
+          ),
+          headers: headers,
+        )
+        .timeout(const Duration(seconds: 10));
 
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final List<dynamic> channelsData = data['channels'] ?? [];
-        final newChannels = channelsData
-            .map((c) => UserChannel.fromJson(c as Map<String, dynamic>))
-            .toList();
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      final List<dynamic> channelsData = data['channels'] ?? [];
+      final newChannels = channelsData
+          .map((c) => UserChannel.fromJson(c as Map<String, dynamic>))
+          .toList();
 
-        final bool changed = channels.length != newChannels.length ||
-            !_listsEqualByJson(
-              channels.map((c) => c.toJson()).toList(),
-              newChannels.map((c) => c.toJson()).toList(),
-            );
+      final bool changed = channels.length != newChannels.length ||
+          !_listsEqualByJson(
+            channels.map((c) => c.toJson()).toList(),
+            newChannels.map((c) => c.toJson()).toList(),
+          );
 
-        if (!changed) {
-          if (kDebugMode) {
-            developer.log('⏭️ Channels refresh: no changes, skipping repaint',
-                name: 'AppCache');
-          }
-          return;
-        }
-
-        channels = newChannels;
-        await saveChannels(channels);
-        _fixturesController.add(fixtures); // existing behavior preserved
+      if (!changed) {
         if (kDebugMode) {
-          developer.log(
-              '✅ AppCache: Refreshed ${channels.length} channels (changed)',
+          developer.log('⏭️ Channels refresh: no changes, skipping repaint',
               name: 'AppCache');
         }
+        return;
       }
-    } catch (e) {
-      developer.log('❌ AppCache: Failed to refresh channels: $e',
-          name: 'AppCache');
+
+      channels = newChannels;
+      await saveChannels(channels);
+      _fixturesController.add(fixtures); // existing behavior preserved
+      if (kDebugMode) {
+        developer.log(
+            '✅ AppCache: Refreshed ${channels.length} channels (changed)',
+            name: 'AppCache');
+      }
     }
+  } catch (e) {
+    developer.log('❌ AppCache: Failed to refresh channels: $e',
+        name: 'AppCache');
   }
+}
 
   // ==========================================================================
   // REFRESH COMRADES - DIFFED
   // ==========================================================================
   static Future<void> refreshComrades(String? authToken) async {
-    try {
-      final headers = {'Content-Type': 'application/json'};
-      if (authToken != null && authToken.isNotEmpty) {
-        headers['Authorization'] = 'Bearer $authToken';
+  try {
+    final headers = {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+    };
+    if (authToken != null && authToken.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $authToken';
+    }
+
+    final response = await http
+        .get(
+          Uri.parse(
+            'https://clash-api-m5mr.onrender.com/api/profile/profiles'
+            '?_=${DateTime.now().millisecondsSinceEpoch}',
+          ),
+          headers: headers,
+        )
+        .timeout(const Duration(seconds: 30));
+
+    if (response.statusCode == 200) {
+      final List<dynamic> data = json.decode(response.body);
+      final List<Map<String, dynamic>> profiles =
+          data.cast<Map<String, dynamic>>();
+
+      final authService = AuthService();
+      final userId = authService.userId;
+
+      List<Map<String, dynamic>> availableUsers;
+      if (userId != null && userId.isNotEmpty) {
+        availableUsers = profiles
+            .where((profile) => profile['user_id']?.toString() != userId)
+            .toList();
+      } else {
+        availableUsers = List.from(profiles);
       }
 
-      final response = await http
-          .get(
-            Uri.parse(
-                'https://clash-api-m5mr.onrender.com/api/profile/profiles'),
-            headers: headers,
-          )
-          .timeout(const Duration(seconds: 30));
+      final newComrades = availableUsers
+          .map((item) => {
+                'id': item['user_id']?.toString() ?? '',
+                'nickname': item['nickname']?.toString() ??
+                    item['username']?.toString() ??
+                    'Fan',
+                'club': item['club_fan']?.toString() ?? 'Football Fan',
+                'country': item['country_fan']?.toString() ?? 'World',
+                'username': item['username']?.toString() ?? 'user',
+              })
+          .toList();
 
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
-        final List<Map<String, dynamic>> profiles =
-            data.cast<Map<String, dynamic>>();
+      final bool changed = !_listsEqualByJson(comrades, newComrades);
 
-        final authService = AuthService();
-        final userId = authService.userId;
-
-        List<Map<String, dynamic>> availableUsers;
-        if (userId != null && userId.isNotEmpty) {
-          availableUsers = profiles
-              .where((profile) => profile['user_id']?.toString() != userId)
-              .toList();
-        } else {
-          availableUsers = List.from(profiles);
-        }
-
-        final newComrades = availableUsers
-            .map((item) => {
-                  'id': item['user_id']?.toString() ?? '',
-                  'nickname': item['nickname']?.toString() ??
-                      item['username']?.toString() ??
-                      'Fan',
-                  'club': item['club_fan']?.toString() ?? 'Football Fan',
-                  'country': item['country_fan']?.toString() ?? 'World',
-                  'username': item['username']?.toString() ?? 'user',
-                })
-            .toList();
-
-        final bool changed = !_listsEqualByJson(comrades, newComrades);
-
-        if (!changed) {
-          if (kDebugMode) {
-            developer.log('⏭️ Comrades refresh: no changes, skipping repaint',
-                name: 'AppCache');
-          }
-          return;
-        }
-
-        comrades = newComrades;
-
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('cached_comrades', jsonEncode(comrades));
+      if (!changed) {
         if (kDebugMode) {
-          developer.log(
-              '✅ AppCache: Refreshed ${comrades.length} comrades (changed)',
+          developer.log('⏭️ Comrades refresh: no changes, skipping repaint',
               name: 'AppCache');
         }
+        return;
       }
-    } catch (e) {
-      developer.log('❌ AppCache: Failed to refresh comrades: $e',
-          name: 'AppCache');
-    }
-  }
 
+      comrades = newComrades;
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('cached_comrades', jsonEncode(comrades));
+      if (kDebugMode) {
+        developer.log(
+            '✅ AppCache: Refreshed ${comrades.length} comrades (changed)',
+            name: 'AppCache');
+      }
+    }
+  } catch (e) {
+    developer.log('❌ AppCache: Failed to refresh comrades: $e',
+        name: 'AppCache');
+  }
+}
   // Generic structural compare for List<Map<String, dynamic>> payloads.
   static bool _listsEqualByJson(
     List<Map<String, dynamic>> a,
@@ -2922,60 +2948,66 @@ class AppCache {
   // REFRESH HISTORY GAMES - Legacy method kept for compatibility
   // ==========================================================================
   static Future<void> refreshHistoryGames({String? authToken}) async {
-    try {
+  try {
+    if (kDebugMode) {
+      developer.log('🔄 Refreshing history games from API...',
+          name: 'AppCache');
+    }
+
+    final headers = {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+    };
+    if (authToken != null && authToken.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $authToken';
+    }
+
+    final response = await http
+        .get(
+          Uri.parse(
+            'https://clash-api-m5mr.onrender.com/api/games/history?limit=100'
+            '&_=${DateTime.now().millisecondsSinceEpoch}',
+          ),
+          headers: headers,
+        )
+        .timeout(const Duration(seconds: 15));
+
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      final List<dynamic> gamesData = data['data'] ?? [];
+
+      historyGames = gamesData
+          .map((g) => HistoryGame.fromJson(g as Map<String, dynamic>))
+          .toList();
+
+      await _saveHistoryGamesToDisk(historyGames);
+      _historyController.add(historyGames);
       if (kDebugMode) {
-        developer.log('🔄 Refreshing history games from API...',
+        developer.log('✅ Refreshed ${historyGames.length} history games',
             name: 'AppCache');
       }
-
-      final headers = {'Content-Type': 'application/json'};
-      if (authToken != null && authToken.isNotEmpty) {
-        headers['Authorization'] = 'Bearer $authToken';
+    } else {
+      if (kDebugMode) {
+        developer.log(
+            '⚠️ Failed to refresh history games: ${response.statusCode}',
+            name: 'AppCache');
       }
-
-      final response = await http
-          .get(
-            Uri.parse(
-                'https://clash-api-m5mr.onrender.com/api/games/history?limit=100'),
-            headers: headers,
-          )
-          .timeout(const Duration(seconds: 15));
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final List<dynamic> gamesData = data['data'] ?? [];
-
-        historyGames = gamesData
-            .map((g) => HistoryGame.fromJson(g as Map<String, dynamic>))
-            .toList();
-
-        await _saveHistoryGamesToDisk(historyGames);
-        _historyController.add(historyGames);
-        if (kDebugMode) {
-          developer.log('✅ Refreshed ${historyGames.length} history games',
-              name: 'AppCache');
-        }
-      } else {
-        if (kDebugMode) {
-          developer.log(
-              '⚠️ Failed to refresh history games: ${response.statusCode}',
-              name: 'AppCache');
-        }
-        final cached = await _loadHistoryGamesFromDisk();
-        if (cached != null) {
-          historyGames = cached;
-          _historyController.add(historyGames);
-        }
-      }
-    } catch (e) {
-      developer.log('❌ Failed to refresh history games: $e', name: 'AppCache');
       final cached = await _loadHistoryGamesFromDisk();
       if (cached != null) {
         historyGames = cached;
         _historyController.add(historyGames);
       }
     }
+  } catch (e) {
+    developer.log('❌ Failed to refresh history games: $e', name: 'AppCache');
+    final cached = await _loadHistoryGamesFromDisk();
+    if (cached != null) {
+      historyGames = cached;
+      _historyController.add(historyGames);
+    }
   }
+}
 
   static Future<void> _saveHistoryGamesToDisk(List<HistoryGame> games) async {
     try {
@@ -4168,6 +4200,24 @@ Future<void> main() async {
   };
 }
 
+Future<bool> _hasNotificationPermission() async {
+  if (kIsWeb) {
+    return WebNotificationService.getPermissionStatus() == 'granted';
+  }
+  final settings = await FirebaseMessaging.instance.getNotificationSettings();
+  return settings.authorizationStatus == AuthorizationStatus.authorized ||
+      settings.authorizationStatus == AuthorizationStatus.provisional;
+}
+
+Future<bool> _requestNotificationPermission() async {
+  if (kIsWeb) {
+    await WebNotificationService.requestPermission();
+    return WebNotificationService.getPermissionStatus() == 'granted';
+  }
+  final settings = await FirebaseMessaging.instance.requestPermission();
+  return settings.authorizationStatus == AuthorizationStatus.authorized;
+}
+
 // ============================================================================
 // MAIN APP WIDGET
 // ============================================================================
@@ -4281,10 +4331,20 @@ class _FunzyppState extends State<Funzypp> with WidgetsBindingObserver {
     }
   }
 
-  void _showLoginModalAsOverlay() {
+ void _showLoginModalAsOverlay() async {
     if (_isLoginModalOpen || !mounted) return;
-    _isLoginModalOpen = true;
 
+    final hasPermission = await _hasNotificationPermission();
+    if (!hasPermission) {
+      _showNotificationGateDialog();
+      return; // login modal never opens until this resolves
+    }
+
+    _openLoginModal();
+  }
+
+  void _openLoginModal() {
+    _isLoginModalOpen = true;
     final context = navigatorKey.currentContext;
     if (context == null) {
       _isLoginModalOpen = false;
@@ -4311,6 +4371,82 @@ class _FunzyppState extends State<Funzypp> with WidgetsBindingObserver {
     ).then((_) {
       _isLoginModalOpen = false;
     });
+  }
+
+  void _showNotificationGateDialog() {
+    final context = navigatorKey.currentContext;
+    if (context == null) return;
+
+    bool isBlocked =
+        kIsWeb && WebNotificationService.getPermissionStatus() == 'denied';
+    bool requesting = false;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false, // can't tap outside to skip it
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (ctx, setD) => PopScope(
+          canPop: false, // can't back-button out of it either
+          child: AlertDialog(
+            backgroundColor: FanColors.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: FanRadius.lgAll,
+              side: BorderSide(color: FanColors.border),
+            ),
+            title: Row(
+              children: [
+                Icon(Icons.notifications_active, color: FanColors.primary),
+                const SizedBox(width: 10),
+                Text('Notifications Required', style: FanTypography.headline),
+              ],
+            ),
+            content: Text(
+              isBlocked
+                  ? 'You blocked notifications for this site. Open your '
+                      'browser\'s site settings, allow notifications, then tap '
+                      'Retry below.'
+                  : 'Funspot needs notification permission before you can '
+                      'log in, so you never miss votes, comments, or comrade '
+                      'activity.',
+              style: FanTypography.body,
+            ),
+            actions: [
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: FanColors.primary,
+                  foregroundColor: FanColors.textInverse,
+                  shape:
+                      RoundedRectangleBorder(borderRadius: FanRadius.pillAll),
+                ),
+                onPressed: requesting
+                    ? null
+                    : () async {
+                        setD(() => requesting = true);
+
+                        final granted = isBlocked
+                            ? await _hasNotificationPermission() // re-check after they fixed it in settings
+                            : await _requestNotificationPermission();
+
+                        if (granted) {
+                          if (dialogContext.mounted)
+                            Navigator.pop(dialogContext);
+                          _openLoginModal();
+                        } else {
+                          setD(() {
+                            requesting = false;
+                            isBlocked = kIsWeb &&
+                                WebNotificationService.getPermissionStatus() ==
+                                    'denied';
+                          });
+                        }
+                      },
+                child: Text(isBlocked ? 'Retry' : 'Allow Notifications'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
