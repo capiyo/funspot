@@ -20,8 +20,6 @@ import "./models/chat_message.dart";
 import 'package:http/http.dart' as http;
 import 'models/comments_model.dart';
 import 'screens/home_page.dart';
-import 'services/notification_service.dart';
-
 
 import 'services/auth_service.dart';
 import 'services/memory_manager.dart';
