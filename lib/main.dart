@@ -9,6 +9,8 @@ import 'dart:developer' as developer;
 import 'dart:io' show Platform;
 import 'firebase_options.dart';
 import 'services/local_notification_service.dart';
+import 'dart:js_interop';
+import 'package:web/web.dart' as web;
 import 'dart:async';
 import 'dart:convert';
 import 'services/web_notification_service.dart';
@@ -20,6 +22,7 @@ import "./models/chat_message.dart";
 import 'package:http/http.dart' as http;
 import 'models/comments_model.dart';
 import 'screens/home_page.dart';
+import 'services/notification_service.dart';
 
 import 'services/auth_service.dart';
 import 'services/memory_manager.dart';
@@ -44,6 +47,39 @@ Timer? _appCacheRefreshTimer;
 // ============================================================================
 // APPCACHE - Enhanced with memory management
 // ============================================================================
+class DiskWriteScheduler {
+  static final Map<String, Timer> _timers = {};
+  static final Map<String, Future<void> Function()> _writers = {};
+  static const Duration _delay = Duration(milliseconds: 400);
+
+  static void schedule(String key, Future<void> Function() write) {
+    _writers[key] = write;
+    _timers[key]?.cancel();
+    _timers[key] = Timer(_delay, () async {
+      _timers.remove(key);
+      final w = _writers.remove(key);
+      if (w == null) return;
+      try {
+        await w();
+      } catch (e) {
+        developer.log('⚠️ Debounced write failed for $key: $e',
+            name: 'AppCache');
+      }
+    });
+  }
+
+  static Future<void> flushAll() async {
+    final keys = _writers.keys.toList();
+    for (final k in keys) {
+      _timers[k]?.cancel();
+      _timers.remove(k);
+    }
+    final writers = keys
+        .map((k) => _writers.remove(k))
+        .whereType<Future<void> Function()>();
+    await Future.wait(writers.map((w) => w()));
+  }
+}
 
 class AppCache {
   // ==========================================================================
@@ -124,13 +160,12 @@ class AppCache {
   // ==========================================================================
   // HISTORY COMMENTS - CACHE METHODS
   // ==========================================================================
-  static void cacheHistoryComments(
+    static void cacheHistoryComments(
       String fixtureId, List<Map<String, dynamic>> comments) {
     _historyComments[fixtureId] = comments;
     _historyCommentFetchTime[fixtureId] = DateTime.now();
-    _saveHistoryCommentsToDisk();
 
-    // Also store in the main message cache for cross-screen consistency
+    // Also mirror into the main message cache for cross-screen consistency.
     final key = 'history_$fixtureId';
     _cachedMessages[key] = comments
         .map((c) => {
@@ -148,7 +183,13 @@ class AppCache {
               'minute': c['minute'] ?? 0,
             })
         .toList();
-    _saveMessagesToDisk();
+
+    // ✅ CHANGED — was two immediate, unawaited full-map JSON encodes back
+    // to back on every call. Debounced under distinct keys so a burst of
+    // calls in the same window collapses to one write each.
+    DiskWriteScheduler.schedule(
+        'history_comments_disk', _saveHistoryCommentsToDisk);
+    DiskWriteScheduler.schedule('cached_messages_disk', _saveMessagesToDisk);
 
     if (kDebugMode) {
       developer.log(
@@ -157,10 +198,9 @@ class AppCache {
     }
   }
 
-  static void addHistoryComment(
+   static void addHistoryComment(
       String fixtureId, Map<String, dynamic> comment) {
     final existing = _historyComments[fixtureId] ?? [];
-    // Avoid duplicates by checking text + timestamp
     final exists = existing.any((c) =>
         c['text'] == comment['text'] && c['timestamp'] == comment['timestamp']);
     if (exists) return;
@@ -168,9 +208,7 @@ class AppCache {
     final updated = [comment, ...existing]; // newest first
     _historyComments[fixtureId] = updated;
     _historyCommentFetchTime[fixtureId] = DateTime.now();
-    _saveHistoryCommentsToDisk();
 
-    // Also update cached messages
     final key = 'history_$fixtureId';
     final msgEntry = {
       'id': comment['id'] ?? 'comment_${DateTime.now().millisecondsSinceEpoch}',
@@ -186,8 +224,15 @@ class AppCache {
       'minute': comment['minute'] ?? 0,
     };
     _cachedMessages[key] = [msgEntry, ...(_cachedMessages[key] ?? [])];
-    _saveMessagesToDisk();
+
+    // ✅ CHANGED — a live match can call this several times a minute purely
+    // from commentary ticks. Debounced, same reasoning as above.
+    DiskWriteScheduler.schedule(
+        'history_comments_disk', _saveHistoryCommentsToDisk);
+    DiskWriteScheduler.schedule('cached_messages_disk', _saveMessagesToDisk);
   }
+
+ 
 
   static Future<void> _saveHistoryCommentsToDisk() async {
     try {
@@ -242,78 +287,79 @@ class AppCache {
   // ==========================================================================
   // REFRESH HISTORY GAMES WITH COMMENTS - FIXED
   // ==========================================================================
- static Future<void> refreshHistoryGamesWithComments(
-    {String? authToken}) async {
-  try {
-    if (kDebugMode) {
-      developer.log('🔄 Refreshing history games with comment preload...',
-          name: 'AppCache');
-    }
+  static Future<void> refreshHistoryGamesWithComments(
+      {String? authToken}) async {
+    try {
+      if (kDebugMode) {
+        developer.log('🔄 Refreshing history games with comment preload...',
+            name: 'AppCache');
+      }
 
-    final headers = {
-      'Content-Type': 'application/json',
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-    };
-    if (authToken != null && authToken.isNotEmpty) {
-      headers['Authorization'] = 'Bearer $authToken';
-    }
+      final headers = {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+      };
+      if (authToken != null && authToken.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $authToken';
+      }
 
-    final response = await http
-        .get(
-          Uri.parse(
-            'https://clash-api-m5mr.onrender.com/api/games/history?limit=100'
-            '&_=${DateTime.now().millisecondsSinceEpoch}',
-          ),
-          headers: headers,
-        )
-        .timeout(const Duration(seconds: 15));
+      final response = await http
+          .get(
+            Uri.parse(
+              'https://clash-api-m5mr.onrender.com/api/games/history?limit=100'
+              '&_=${DateTime.now().millisecondsSinceEpoch}',
+            ),
+            headers: headers,
+          )
+          .timeout(const Duration(seconds: 15));
 
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      final List<dynamic> gamesData = data['data'] ?? [];
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final List<dynamic> gamesData = data['data'] ?? [];
 
-      historyGames = gamesData
-          .map((g) => HistoryGame.fromJson(g as Map<String, dynamic>))
-          .toList();
+        historyGames = gamesData
+            .map((g) => HistoryGame.fromJson(g as Map<String, dynamic>))
+            .toList();
 
-      await _saveHistoryGamesToDisk(historyGames);
-      _historyController.add(historyGames);
+        await _saveHistoryGamesToDisk(historyGames);
+        _historyController.add(historyGames);
 
-      // Preload comments for the first 5 games
-      final gamesToCache = historyGames.take(5).toList();
-      for (var game in gamesToCache) {
-        if (!_historyComments.containsKey(game.id)) {
-          unawaited(_fetchAndCacheHistoryComments(game.id, authToken));
+        // Preload comments for the first 5 games
+        final gamesToCache = historyGames.take(5).toList();
+        for (var game in gamesToCache) {
+          if (!_historyComments.containsKey(game.id)) {
+            unawaited(_fetchAndCacheHistoryComments(game.id, authToken));
+          }
+        }
+
+        if (kDebugMode) {
+          developer.log(
+              '✅ Refreshed ${historyGames.length} history games, preloading comments for ${gamesToCache.length}',
+              name: 'AppCache');
+        }
+      } else {
+        if (kDebugMode) {
+          developer.log(
+              '⚠️ Failed to refresh history games: ${response.statusCode}',
+              name: 'AppCache');
+        }
+        final cached = await _loadHistoryGamesFromDisk();
+        if (cached != null) {
+          historyGames = cached;
+          _historyController.add(historyGames);
         }
       }
-
-      if (kDebugMode) {
-        developer.log(
-            '✅ Refreshed ${historyGames.length} history games, preloading comments for ${gamesToCache.length}',
-            name: 'AppCache');
-      }
-    } else {
-      if (kDebugMode) {
-        developer.log(
-            '⚠️ Failed to refresh history games: ${response.statusCode}',
-            name: 'AppCache');
-      }
+    } catch (e) {
+      developer.log('❌ Failed to refresh history games: $e', name: 'AppCache');
       final cached = await _loadHistoryGamesFromDisk();
       if (cached != null) {
         historyGames = cached;
         _historyController.add(historyGames);
       }
     }
-  } catch (e) {
-    developer.log('❌ Failed to refresh history games: $e', name: 'AppCache');
-    final cached = await _loadHistoryGamesFromDisk();
-    if (cached != null) {
-      historyGames = cached;
-      _historyController.add(historyGames);
-    }
   }
-}
+
   static Future<void> _fetchAndCacheHistoryComments(
       String fixtureId, String? authToken) async {
     try {
@@ -908,19 +954,7 @@ class AppCache {
   // ==========================================================================
   // SAVE/Load USER VOTES
   // ==========================================================================
-  static Future<void> saveUserVotes() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('cached_user_votes', jsonEncode(userVotes));
-      if (kDebugMode) {
-        developer.log('💾 AppCache: Saved ${userVotes.length} user votes',
-            name: 'AppCache');
-      }
-    } catch (e) {
-      developer.log('❌ AppCache: Error saving user votes: $e',
-          name: 'AppCache');
-    }
-  }
+ 
 
   static Future<void> loadUserVotes() async {
     try {
@@ -1302,7 +1336,7 @@ class AppCache {
   // ==========================================================================
   // SINGLE UPDATE METHOD
   // ==========================================================================
-  static void applyUpdate({
+    static void applyUpdate({
     required String fixtureId,
     required String updateType,
     required int value,
@@ -1335,7 +1369,7 @@ class AppCache {
 
         if (extraData?['userVote'] != null) {
           userVotes[fixtureId] = extraData!['userVote'] as String;
-          saveUserVotes();
+          saveUserVotes(); // now debounced internally, see below
           notifyVotesChanged();
         }
 
@@ -1433,10 +1467,20 @@ class AppCache {
         break;
     }
 
-    _saveToDisk(fixtureId, updateType, value, extraData);
+    // ✅ CHANGED — was an unawaited immediate _saveToDisk(...) on every
+    // single event. Under live commentary this can fire multiple times a
+    // second, each one decoding + re-encoding the full cache map for that
+    // update type on the main thread. Debounced per (updateType, fixtureId)
+    // so a burst collapses into one write ~400ms after it settles.
+    // In-memory state above is still updated synchronously — only disk
+    // persistence is deferred.
+    DiskWriteScheduler.schedule(
+      '$updateType:$fixtureId',
+      () => _saveToDisk(fixtureId, updateType, value, extraData),
+    );
+
     _fixturesController.add(fixtures);
   }
-
   static DateTime? _getLastUpdate(String fixtureId, String type) {
     switch (type) {
       case 'vote':
@@ -1579,40 +1623,8 @@ class AppCache {
   // ==========================================================================
   // SAVE METHODS
   // ==========================================================================
-  static Future<void> saveVoteCount(String fixtureId, int count) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final fastData = prefs.getString('vote_counts_cache') ?? '{}';
-      final Map<String, dynamic> fastMap = json.decode(fastData);
-      fastMap[fixtureId] = count;
-      await prefs.setString('vote_counts_cache', json.encode(fastMap));
-      _voteCounts[fixtureId] = count;
-      if (kDebugMode) {
-        developer.log('💾 Saved vote count $count for fixture $fixtureId',
-            name: 'AppCache');
-      }
-    } catch (e) {
-      developer.log('⚠️ Failed to save vote count: $e', name: 'AppCache');
-    }
-  }
-
-  static Future<void> saveCommentCount(String fixtureId, int count) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final commentData = prefs.getString('comment_counts_cache') ?? '{}';
-      final Map<String, dynamic> data = json.decode(commentData);
-      data[fixtureId] = count;
-      await prefs.setString('comment_counts_cache', json.encode(data));
-      _commentCounts[fixtureId] = count;
-      if (kDebugMode) {
-        developer.log('💾 Saved comment count $count for fixture $fixtureId',
-            name: 'AppCache');
-      }
-    } catch (e) {
-      developer.log('⚠️ Failed to save comment count: $e', name: 'AppCache');
-    }
-  }
-
+  
+  
   static Future<void> saveLatestComment(
     String fixtureId,
     String comment,
@@ -1688,39 +1700,9 @@ class AppCache {
     return _latestCommentIsCommentaryReply[fixtureId] ?? false;
   }
 
-  static Future<void> saveLikeCount(String fixtureId, int count) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final likeData = prefs.getString('like_counts_cache') ?? '{}';
-      final Map<String, dynamic> data = json.decode(likeData);
-      data[fixtureId] = count;
-      await prefs.setString('like_counts_cache', json.encode(data));
-      _likeCounts[fixtureId] = count;
-      if (kDebugMode) {
-        developer.log('💾 Saved like count $count for fixture $fixtureId',
-            name: 'AppCache');
-      }
-    } catch (e) {
-      developer.log('⚠️ Failed to save like count: $e', name: 'AppCache');
-    }
-  }
+  
 
-  static Future<void> saveUnreadCount(String fixtureId, int count) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final unreadData = prefs.getString('unread_counts_cache') ?? '{}';
-      final Map<String, dynamic> data = json.decode(unreadData);
-      data[fixtureId] = count;
-      await prefs.setString('unread_counts_cache', json.encode(data));
-      _unreadCounts[fixtureId] = count;
-      if (kDebugMode) {
-        developer.log('💾 Saved unread count $count for fixture $fixtureId',
-            name: 'AppCache');
-      }
-    } catch (e) {
-      developer.log('⚠️ Failed to save unread count: $e', name: 'AppCache');
-    }
-  }
+ 
 
   // ==========================================================================
   // CHAT MESSAGE FETCHING
@@ -1919,7 +1901,8 @@ class AppCache {
       developer.log('✅ AppCache: Refresh complete', name: 'AppCache');
     }
   }
-    // ==========================================================================
+
+  // ==========================================================================
   // REFRESH FIXTURES WITH TIME - DIFFED (only notifies on real change)
   // ==========================================================================
   static Future<void> refreshFixturesWithTime() async {
@@ -1985,154 +1968,163 @@ class AppCache {
   // Structural compare via toJson() — cheap, no need to touch the Fixture
   // model. Order-sensitive on purpose: if the API reorders fixtures, that's
   // a real change worth repainting for.
+    // ✅ CHANGED — was json.encode(toJson()) on every fixture in both lists,
+  // on every refresh (including the 5-minute auto-timer), just to answer
+  // "did anything change?". Real updates only ever touch a few fields, so
+  // build a signature from those instead of the full object graph.
   static bool _fixtureListsEqual(List<Fixture> a, List<Fixture> b) {
     if (a.length != b.length) return false;
     for (var i = 0; i < a.length; i++) {
-      if (json.encode(a[i].toJson()) != json.encode(b[i].toJson())) {
+      if (_fixtureSignature(a[i]) != _fixtureSignature(b[i])) {
         return false;
       }
     }
     return true;
   }
 
+  static String _fixtureSignature(Fixture f) {
+    final id = f.matchId ?? f.id;
+    return '$id|${f.status}|${f.homeScore}|${f.awayScore}|${f.timeElapsed}|${f.isLive}';
+  }
   // ==========================================================================
   // REFRESH CHANNELS - DIFFED
   // ==========================================================================
   static Future<void> refreshChannels(String userId, String? authToken) async {
-  try {
-    final headers = {
-      'Content-Type': 'application/json',
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-    };
-    if (authToken != null && authToken.isNotEmpty) {
-      headers['Authorization'] = 'Bearer $authToken';
-    }
+    try {
+      final headers = {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+      };
+      if (authToken != null && authToken.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $authToken';
+      }
 
-    final response = await http
-        .get(
-          Uri.parse(
-            'https://clash-api-m5mr.onrender.com/api/channels/user/$userId'
-            '?_=${DateTime.now().millisecondsSinceEpoch}',
-          ),
-          headers: headers,
-        )
-        .timeout(const Duration(seconds: 10));
+      final response = await http
+          .get(
+            Uri.parse(
+              'https://clash-api-m5mr.onrender.com/api/channels/user/$userId'
+              '?_=${DateTime.now().millisecondsSinceEpoch}',
+            ),
+            headers: headers,
+          )
+          .timeout(const Duration(seconds: 10));
 
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      final List<dynamic> channelsData = data['channels'] ?? [];
-      final newChannels = channelsData
-          .map((c) => UserChannel.fromJson(c as Map<String, dynamic>))
-          .toList();
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final List<dynamic> channelsData = data['channels'] ?? [];
+        final newChannels = channelsData
+            .map((c) => UserChannel.fromJson(c as Map<String, dynamic>))
+            .toList();
 
-      final bool changed = channels.length != newChannels.length ||
-          !_listsEqualByJson(
-            channels.map((c) => c.toJson()).toList(),
-            newChannels.map((c) => c.toJson()).toList(),
-          );
+        final bool changed = channels.length != newChannels.length ||
+            !_listsEqualByJson(
+              channels.map((c) => c.toJson()).toList(),
+              newChannels.map((c) => c.toJson()).toList(),
+            );
 
-      if (!changed) {
+        if (!changed) {
+          if (kDebugMode) {
+            developer.log('⏭️ Channels refresh: no changes, skipping repaint',
+                name: 'AppCache');
+          }
+          return;
+        }
+
+        channels = newChannels;
+        await saveChannels(channels);
+        _fixturesController.add(fixtures); // existing behavior preserved
         if (kDebugMode) {
-          developer.log('⏭️ Channels refresh: no changes, skipping repaint',
+          developer.log(
+              '✅ AppCache: Refreshed ${channels.length} channels (changed)',
               name: 'AppCache');
         }
-        return;
       }
-
-      channels = newChannels;
-      await saveChannels(channels);
-      _fixturesController.add(fixtures); // existing behavior preserved
-      if (kDebugMode) {
-        developer.log(
-            '✅ AppCache: Refreshed ${channels.length} channels (changed)',
-            name: 'AppCache');
-      }
+    } catch (e) {
+      developer.log('❌ AppCache: Failed to refresh channels: $e',
+          name: 'AppCache');
     }
-  } catch (e) {
-    developer.log('❌ AppCache: Failed to refresh channels: $e',
-        name: 'AppCache');
   }
-}
 
   // ==========================================================================
   // REFRESH COMRADES - DIFFED
   // ==========================================================================
   static Future<void> refreshComrades(String? authToken) async {
-  try {
-    final headers = {
-      'Content-Type': 'application/json',
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-    };
-    if (authToken != null && authToken.isNotEmpty) {
-      headers['Authorization'] = 'Bearer $authToken';
-    }
-
-    final response = await http
-        .get(
-          Uri.parse(
-            'https://clash-api-m5mr.onrender.com/api/profile/profiles'
-            '?_=${DateTime.now().millisecondsSinceEpoch}',
-          ),
-          headers: headers,
-        )
-        .timeout(const Duration(seconds: 30));
-
-    if (response.statusCode == 200) {
-      final List<dynamic> data = json.decode(response.body);
-      final List<Map<String, dynamic>> profiles =
-          data.cast<Map<String, dynamic>>();
-
-      final authService = AuthService();
-      final userId = authService.userId;
-
-      List<Map<String, dynamic>> availableUsers;
-      if (userId != null && userId.isNotEmpty) {
-        availableUsers = profiles
-            .where((profile) => profile['user_id']?.toString() != userId)
-            .toList();
-      } else {
-        availableUsers = List.from(profiles);
+    try {
+      final headers = {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+      };
+      if (authToken != null && authToken.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $authToken';
       }
 
-      final newComrades = availableUsers
-          .map((item) => {
-                'id': item['user_id']?.toString() ?? '',
-                'nickname': item['nickname']?.toString() ??
-                    item['username']?.toString() ??
-                    'Fan',
-                'club': item['club_fan']?.toString() ?? 'Football Fan',
-                'country': item['country_fan']?.toString() ?? 'World',
-                'username': item['username']?.toString() ?? 'user',
-              })
-          .toList();
+      final response = await http
+          .get(
+            Uri.parse(
+              'https://clash-api-m5mr.onrender.com/api/profile/profiles'
+              '?_=${DateTime.now().millisecondsSinceEpoch}',
+            ),
+            headers: headers,
+          )
+          .timeout(const Duration(seconds: 30));
 
-      final bool changed = !_listsEqualByJson(comrades, newComrades);
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        final List<Map<String, dynamic>> profiles =
+            data.cast<Map<String, dynamic>>();
 
-      if (!changed) {
+        final authService = AuthService();
+        final userId = authService.userId;
+
+        List<Map<String, dynamic>> availableUsers;
+        if (userId != null && userId.isNotEmpty) {
+          availableUsers = profiles
+              .where((profile) => profile['user_id']?.toString() != userId)
+              .toList();
+        } else {
+          availableUsers = List.from(profiles);
+        }
+
+        final newComrades = availableUsers
+            .map((item) => {
+                  'id': item['user_id']?.toString() ?? '',
+                  'nickname': item['nickname']?.toString() ??
+                      item['username']?.toString() ??
+                      'Fan',
+                  'club': item['club_fan']?.toString() ?? 'Football Fan',
+                  'country': item['country_fan']?.toString() ?? 'World',
+                  'username': item['username']?.toString() ?? 'user',
+                })
+            .toList();
+
+        final bool changed = !_listsEqualByJson(comrades, newComrades);
+
+        if (!changed) {
+          if (kDebugMode) {
+            developer.log('⏭️ Comrades refresh: no changes, skipping repaint',
+                name: 'AppCache');
+          }
+          return;
+        }
+
+        comrades = newComrades;
+
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('cached_comrades', jsonEncode(comrades));
         if (kDebugMode) {
-          developer.log('⏭️ Comrades refresh: no changes, skipping repaint',
+          developer.log(
+              '✅ AppCache: Refreshed ${comrades.length} comrades (changed)',
               name: 'AppCache');
         }
-        return;
       }
-
-      comrades = newComrades;
-
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('cached_comrades', jsonEncode(comrades));
-      if (kDebugMode) {
-        developer.log(
-            '✅ AppCache: Refreshed ${comrades.length} comrades (changed)',
-            name: 'AppCache');
-      }
+    } catch (e) {
+      developer.log('❌ AppCache: Failed to refresh comrades: $e',
+          name: 'AppCache');
     }
-  } catch (e) {
-    developer.log('❌ AppCache: Failed to refresh comrades: $e',
-        name: 'AppCache');
   }
-}
+
   // Generic structural compare for List<Map<String, dynamic>> payloads.
   static bool _listsEqualByJson(
     List<Map<String, dynamic>> a,
@@ -2144,8 +2136,6 @@ class AppCache {
     }
     return true;
   }
-
- 
 
   static Future<void> _refreshProfile(String userId, String? authToken) async {
     try {
@@ -2186,8 +2176,6 @@ class AppCache {
           name: 'AppCache');
     }
   }
-
-  
 
   static Future<void> _refreshUserVotes(
       String userId, String? authToken) async {
@@ -2294,7 +2282,6 @@ class AppCache {
         }
       } else {
         try {
-         
           if (kDebugMode) {
             developer.log(
                 '🌱 Instant: seeded ${fixtures.length} fixtures from bundle (first launch)',
@@ -2600,7 +2587,7 @@ class AppCache {
   // posted from FixturesPage was invisible to ChatScreen until the app
   // process was killed and restarted. This keeps _cachedMessages current
   // no matter which screen sent or received the message.
-  static void appendCachedMessage(
+   static void appendCachedMessage(
     String channelId,
     String fixtureId,
     Map<String, dynamic> message,
@@ -2616,7 +2603,11 @@ class AppCache {
     if (alreadyExists) return;
 
     _cachedMessages[key] = [...list, message];
-    _saveMessagesToDisk();
+
+    // ✅ CHANGED — debounced. A burst of incoming messages right after
+    // joining a live room previously triggered one full _cachedMessages
+    // encode+write per message.
+    DiskWriteScheduler.schedule('cached_messages_disk', _saveMessagesToDisk);
 
     if (kDebugMode) {
       developer.log(
@@ -2945,66 +2936,66 @@ class AppCache {
   // REFRESH HISTORY GAMES - Legacy method kept for compatibility
   // ==========================================================================
   static Future<void> refreshHistoryGames({String? authToken}) async {
-  try {
-    if (kDebugMode) {
-      developer.log('🔄 Refreshing history games from API...',
-          name: 'AppCache');
-    }
-
-    final headers = {
-      'Content-Type': 'application/json',
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-    };
-    if (authToken != null && authToken.isNotEmpty) {
-      headers['Authorization'] = 'Bearer $authToken';
-    }
-
-    final response = await http
-        .get(
-          Uri.parse(
-            'https://clash-api-m5mr.onrender.com/api/games/history?limit=100'
-            '&_=${DateTime.now().millisecondsSinceEpoch}',
-          ),
-          headers: headers,
-        )
-        .timeout(const Duration(seconds: 15));
-
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      final List<dynamic> gamesData = data['data'] ?? [];
-
-      historyGames = gamesData
-          .map((g) => HistoryGame.fromJson(g as Map<String, dynamic>))
-          .toList();
-
-      await _saveHistoryGamesToDisk(historyGames);
-      _historyController.add(historyGames);
+    try {
       if (kDebugMode) {
-        developer.log('✅ Refreshed ${historyGames.length} history games',
+        developer.log('🔄 Refreshing history games from API...',
             name: 'AppCache');
       }
-    } else {
-      if (kDebugMode) {
-        developer.log(
-            '⚠️ Failed to refresh history games: ${response.statusCode}',
-            name: 'AppCache');
+
+      final headers = {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+      };
+      if (authToken != null && authToken.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $authToken';
       }
+
+      final response = await http
+          .get(
+            Uri.parse(
+              'https://clash-api-m5mr.onrender.com/api/games/history?limit=100'
+              '&_=${DateTime.now().millisecondsSinceEpoch}',
+            ),
+            headers: headers,
+          )
+          .timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final List<dynamic> gamesData = data['data'] ?? [];
+
+        historyGames = gamesData
+            .map((g) => HistoryGame.fromJson(g as Map<String, dynamic>))
+            .toList();
+
+        await _saveHistoryGamesToDisk(historyGames);
+        _historyController.add(historyGames);
+        if (kDebugMode) {
+          developer.log('✅ Refreshed ${historyGames.length} history games',
+              name: 'AppCache');
+        }
+      } else {
+        if (kDebugMode) {
+          developer.log(
+              '⚠️ Failed to refresh history games: ${response.statusCode}',
+              name: 'AppCache');
+        }
+        final cached = await _loadHistoryGamesFromDisk();
+        if (cached != null) {
+          historyGames = cached;
+          _historyController.add(historyGames);
+        }
+      }
+    } catch (e) {
+      developer.log('❌ Failed to refresh history games: $e', name: 'AppCache');
       final cached = await _loadHistoryGamesFromDisk();
       if (cached != null) {
         historyGames = cached;
         _historyController.add(historyGames);
       }
     }
-  } catch (e) {
-    developer.log('❌ Failed to refresh history games: $e', name: 'AppCache');
-    final cached = await _loadHistoryGamesFromDisk();
-    if (cached != null) {
-      historyGames = cached;
-      _historyController.add(historyGames);
-    }
   }
-}
 
   static Future<void> _saveHistoryGamesToDisk(List<HistoryGame> games) async {
     try {
@@ -3320,10 +3311,98 @@ class AppCache {
     );
   }
 
-  static Future<void> saveUserComrades(Set<String> comrades) async {
-    userComrades = comrades;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList('cached_user_comrades', comrades.toList());
+    static Future<void> saveVoteCount(String fixtureId, int count) async {
+    _voteCounts[fixtureId] = count;
+
+    // ✅ CHANGED — was an immediate read→decode→merge→encode→write against
+    // disk every call. _voteCounts is already correct in memory, so the
+    // debounced flush just serializes it directly. Calls for different
+    // fixtures inside the same debounce window collapse into one write.
+    DiskWriteScheduler.schedule('vote_counts_cache', () async {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('vote_counts_cache', json.encode(_voteCounts));
+        if (kDebugMode) {
+          developer.log('💾 Flushed ${_voteCounts.length} vote counts',
+              name: 'AppCache');
+        }
+      } catch (e) {
+        developer.log('⚠️ Failed to save vote counts: $e', name: 'AppCache');
+      }
+    });
+  }
+
+  static Future<void> saveCommentCount(String fixtureId, int count) async {
+    _commentCounts[fixtureId] = count;
+
+    DiskWriteScheduler.schedule('comment_counts_cache', () async {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(
+            'comment_counts_cache', json.encode(_commentCounts));
+        if (kDebugMode) {
+          developer.log('💾 Flushed ${_commentCounts.length} comment counts',
+              name: 'AppCache');
+        }
+      } catch (e) {
+        developer.log('⚠️ Failed to save comment counts: $e', name: 'AppCache');
+      }
+    });
+  }
+
+  static Future<void> saveLikeCount(String fixtureId, int count) async {
+    _likeCounts[fixtureId] = count;
+
+    DiskWriteScheduler.schedule('like_counts_cache', () async {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('like_counts_cache', json.encode(_likeCounts));
+        if (kDebugMode) {
+          developer.log('💾 Flushed ${_likeCounts.length} like counts',
+              name: 'AppCache');
+        }
+      } catch (e) {
+        developer.log('⚠️ Failed to save like counts: $e', name: 'AppCache');
+      }
+    });
+  }
+
+  static Future<void> saveUnreadCount(String fixtureId, int count) async {
+    _unreadCounts[fixtureId] = count;
+
+    DiskWriteScheduler.schedule('unread_counts_cache', () async {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(
+            'unread_counts_cache', json.encode(_unreadCounts));
+        if (kDebugMode) {
+          developer.log('💾 Flushed ${_unreadCounts.length} unread counts',
+              name: 'AppCache');
+        }
+      } catch (e) {
+        developer.log('⚠️ Failed to save unread counts: $e', name: 'AppCache');
+      }
+    });
+  }
+
+  static Future<void> saveUserVotes() async {
+    // ✅ CHANGED — debounced. setUserVote()/applyUpdate() can both call
+    // this back-to-back for rapid vote changes; this collapses that into
+    // one write. Returns before the actual disk write completes, matching
+    // how every existing call site already treats this as fire-and-forget.
+    DiskWriteScheduler.schedule('cached_user_votes', () async {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('cached_user_votes', jsonEncode(userVotes));
+        if (kDebugMode) {
+          developer.log('💾 AppCache: Saved ${userVotes.length} user votes',
+              name: 'AppCache');
+        }
+      } catch (e) {
+        developer.log('❌ AppCache: Error saving user votes: $e',
+            name: 'AppCache');
+      }
+    });
   }
 
   static Future<void> saveComradeVoters(
@@ -3837,8 +3916,6 @@ Future<void> _showJoinChannelDialog(String inviteCode) async {
 // FCM SETUP
 // ============================================================================
 
-
-
 Future<void> initializeFCMWeb() async {
   debugPrint('FCM DEBUG: initializeFCMWeb() entered');
   try {
@@ -3848,7 +3925,8 @@ Future<void> initializeFCMWeb() async {
     debugPrint('FCM DEBUG: WebNotificationService.requestPermission() done');
 
     final settings = await FirebaseMessaging.instance.requestPermission();
-    debugPrint('FCM DEBUG: requestPermission() -> ${settings.authorizationStatus}');
+    debugPrint(
+        'FCM DEBUG: requestPermission() -> ${settings.authorizationStatus}');
 
     if (settings.authorizationStatus != AuthorizationStatus.authorized) {
       debugPrint('FCM DEBUG: permission NOT authorized, aborting');
@@ -3859,16 +3937,19 @@ Future<void> initializeFCMWeb() async {
     debugPrint('FCM DEBUG: about to call getToken()');
     // Web requires the VAPID key to get a token.
     final token = await FirebaseMessaging.instance.getToken(
-      vapidKey: 'BIvcsdfnoQ07A2PAEiXvHfjLPOfyga-fiPB-JLJfdr7NbXxwWJMr6fNT-71RzUVP-WZcL76W_sN137Fs9wMhi90',
+      vapidKey:
+          'BIvcsdfnoQ07A2PAEiXvHfjLPOfyga-fiPB-JLJfdr7NbXxwWJMr6fNT-71RzUVP-WZcL76W_sN137Fs9wMhi90',
     );
-    debugPrint('FCM DEBUG: getToken() returned -> ${token == null ? "NULL" : "token acquired (len=${token.length})"}');
+    debugPrint(
+        'FCM DEBUG: getToken() returned -> ${token == null ? "NULL" : "token acquired (len=${token.length})"}');
 
     if (token != null) {
       developer.log('📱 Web FCM Token acquired', name: 'Funzypp');
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('fcm_token', token);
 
-      debugPrint('FCM DEBUG: isLoggedIn=${authService.isLoggedIn}, userId=${authService.userId}');
+      debugPrint(
+          'FCM DEBUG: isLoggedIn=${authService.isLoggedIn}, userId=${authService.userId}');
 
       if (authService.isLoggedIn && authService.userId != null) {
         debugPrint('FCM DEBUG: calling NotificationService.registerToken()');
@@ -3951,7 +4032,8 @@ Future<void> initializeFCM() async {
     debugPrint('FCM DEBUG: LocalNotificationService.initialize() done');
 
     final settings = await FirebaseMessaging.instance.requestPermission();
-    debugPrint('FCM DEBUG: requestPermission() -> ${settings.authorizationStatus}');
+    debugPrint(
+        'FCM DEBUG: requestPermission() -> ${settings.authorizationStatus}');
 
     if (settings.authorizationStatus != AuthorizationStatus.authorized) {
       debugPrint('FCM DEBUG: permission NOT authorized, aborting');
@@ -3963,7 +4045,8 @@ Future<void> initializeFCM() async {
 
     debugPrint('FCM DEBUG: about to call getToken()');
     final token = await FirebaseMessaging.instance.getToken();
-    debugPrint('FCM DEBUG: getToken() returned -> ${token == null ? "NULL" : "token acquired (len=${token.length})"}');
+    debugPrint(
+        'FCM DEBUG: getToken() returned -> ${token == null ? "NULL" : "token acquired (len=${token.length})"}');
 
     if (token != null) {
       developer.log(
@@ -3973,7 +4056,8 @@ Future<void> initializeFCM() async {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('fcm_token', token);
 
-      debugPrint('FCM DEBUG: isLoggedIn=${authService.isLoggedIn}, userId=${authService.userId}');
+      debugPrint(
+          'FCM DEBUG: isLoggedIn=${authService.isLoggedIn}, userId=${authService.userId}');
 
       if (authService.isLoggedIn && authService.userId != null) {
         final platform = Platform.isIOS ? 'ios' : 'android';
@@ -4064,18 +4148,6 @@ Future<void> initializeFCM() async {
   }
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
 Map<String, dynamic> _buildPayload(RemoteMessage message) {
   final type =
       message.data['type'] ?? message.data['notificationType'] ?? 'general';
@@ -4118,33 +4190,38 @@ void _loadHeavyDataInBackground() {
   });
 }
 
-
-
 // ============================================================================
 // MAIN ENTRY POINT - FAST STARTUP
 // ============================================================================
 Future<void> main() async {
   final widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
 
-  // ✅ Tell the native splash to stay up past first frame — this is what
-  // eliminates the blank/white flash between native splash and Flutter UI.
-  FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
+  // ✅ Only hold the native splash artificially on the very first launch.
+  // The OS-level splash image still flashes briefly on every cold start
+  // (that's unavoidable — it's drawn before Flutter code runs at all).
+  // What we control here is whether we keep it on screen through init,
+  // or let it disappear the instant the engine hands off to Flutter.
+  final splashPrefs = await SharedPreferences.getInstance();
+  final isFirstLaunch = !(splashPrefs.getBool('has_launched_before') ?? false);
+
+  if (isFirstLaunch) {
+    FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
+  }
 
   final sw = Stopwatch()..start();
 
-  // ✅ AWAITED — was `unawaited(...)`. Nothing that touches Firebase
-  // (FirebaseMessaging.instance, FirebaseAuth, etc.) is safe to call
-  // until this has actually completed. Racing it caused an intermittent
-  // JS/Dart interop TypeError inside requestPermission() on web.
+  // ✅ AWAITED — nothing that touches Firebase (FirebaseMessaging.instance,
+  // FirebaseAuth, etc.) is safe to call until this has actually completed.
+  // Racing it caused an intermittent JS/Dart interop TypeError inside
+  // requestPermission() on web.
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
   authService = AuthService();
-  // ✅ Was unawaited — awaited now so isLoggedIn/userId are reliably known
-  // before HomePage.initState() and initializeFCM() both check them. This
-  // is a fast SharedPreferences read, not a network call, so it doesn't
-  // meaningfully delay startup.
+  // ✅ Awaited so isLoggedIn/userId are reliably known before
+  // HomePage.initState() and initializeFCM() both check them. This is a
+  // fast SharedPreferences read, not a network call.
   await authService.initialize();
 
   await AppCache.loadFixturesInstantly();
@@ -4157,11 +4234,15 @@ Future<void> main() async {
   developer.log('⏱ runApp called at ${sw.elapsedMilliseconds}ms',
       name: 'Funzypp');
 
-  // ✅ Remove the native splash only once the first real frame (with
-  // fixtures + votes already populated) has actually been painted.
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    FlutterNativeSplash.remove();
-  });
+  // ✅ Only remove a splash we actually preserved. On repeat launches
+  // there's nothing being held, so this block is skipped entirely and
+  // the native splash is released by the engine as soon as it's ready.
+  if (isFirstLaunch) {
+    await splashPrefs.setBool('has_launched_before', true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      FlutterNativeSplash.remove();
+    });
+  }
 
   WidgetsBinding.instance.addPostFrameCallback((_) {
     _loadHeavyDataInBackground();
@@ -4196,7 +4277,6 @@ Future<void> main() async {
         name: 'Funzypp', error: details.exception);
   };
 }
-
 Future<bool> _hasNotificationPermission() async {
   if (kIsWeb) {
     return WebNotificationService.getPermissionStatus() == 'granted';
@@ -4262,7 +4342,7 @@ class _FunzyppState extends State<Funzypp> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  @override
+    @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     switch (state) {
       case AppLifecycleState.resumed:
@@ -4274,19 +4354,7 @@ class _FunzyppState extends State<Funzypp> with WidgetsBindingObserver {
           MemoryManager().onForeground();
           startAppCacheRefresh();
         }
-        break;
-        case AppLifecycleState.resumed:
-        _backgroundTeardownTimer?.cancel();
-        _backgroundTeardownTimer = null;
 
-        if (_isBackground) {
-          _isBackground = false;
-          MemoryManager().onForeground();
-          startAppCacheRefresh();
-        }
-
-        // ✅ NEW — reconcile with the server on every resume, so counts
-        // recover even if a push was missed entirely while backgrounded.
         if (_isLoggedIn && _userId != null) {
           final adminChannelIds = AppCache.channels
               .where((c) => c.isAdmin)
@@ -4307,6 +4375,12 @@ class _FunzyppState extends State<Funzypp> with WidgetsBindingObserver {
           MemoryManager().onBackground();
           stopAppCacheRefresh();
         });
+
+        // ✅ NEW — flush every pending debounced write immediately. Without
+        // this, a write scheduled just before the tab backgrounds/closes
+        // (web) or the process dies (mobile) could be lost waiting out a
+        // timer that may never fire.
+        unawaited(DiskWriteScheduler.flushAll());
         break;
 
       case AppLifecycleState.inactive:
@@ -4352,7 +4426,7 @@ class _FunzyppState extends State<Funzypp> with WidgetsBindingObserver {
     }
   }
 
- void _showLoginModalAsOverlay() async {
+  void _showLoginModalAsOverlay() async {
     if (_isLoginModalOpen || !mounted) return;
 
     final hasPermission = await _hasNotificationPermission();
@@ -4492,7 +4566,7 @@ class _FunzyppState extends State<Funzypp> with WidgetsBindingObserver {
     );
   }
 
- Widget _buildHome() {
+  Widget _buildHome() {
     return AppShell(userId: _authService.userId);
   }
 }

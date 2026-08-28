@@ -301,6 +301,7 @@ class NotificationService {
       debugPrint('[NotificationService] ❌ Badge update error: $e');
     }
   }
+
   // ─── Reconcile with server (call on resume / tab focus) ────────────────────
   /// Pulls the true current state from the backend and corrects local
   /// caches + emits badge updates. This is the fix for missed background
@@ -444,6 +445,7 @@ class NotificationService {
       return null;
     }
   }
+
   /// Returns 'granted' | 'denied' | 'default' on web, 'unsupported' elsewhere.
   static String getPermissionStatus() {
     if (!kIsWeb) return 'unsupported';

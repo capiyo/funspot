@@ -1,5 +1,6 @@
 // lib/widgets/web_navbar.dart
 import 'dart:async';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../../pages/fan_Funzy_design.dart';
 import '../../models/user_channel.dart';
@@ -7,26 +8,31 @@ import '../../models/user_channel.dart';
 /// Funspot brand gradient — deep emerald → jade → gold accent.
 class FunspotGradients {
   static const List<Color> navbar = [
-    Color(0xFF0B3D2E),
-    Color(0xFF10583F),
-    Color(0xFF1C7A52),
+    Color(0xFF07291E),
+    Color(0xFF0E4A34),
+    Color(0xFF15693F),
   ];
 
   static const List<Color> logo = [
+    Color(0xFF6EE7B7),
     Color(0xFF34D399),
     Color(0xFF059669),
-    Color(0xFF065F46),
   ];
 
   static const List<Color> gold = [
-    Color(0xFFFFE08A),
+    Color(0xFFFFE9A8),
     Color(0xFFF5B841),
     Color(0xFFD68F0E),
   ];
 
   static const List<Color> avatarRing = [
-    Color(0xFF34D399),
+    Color(0xFF6EE7B7),
     Color(0xFFFFD166),
+  ];
+
+  static const List<Color> glassSheen = [
+    Color(0x1AFFFFFF),
+    Color(0x00FFFFFF),
   ];
 }
 
@@ -57,12 +63,16 @@ class _WebTappable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final radius = borderRadius ?? BorderRadius.circular(8);
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         onLongPress: onLongPress,
-        borderRadius: borderRadius ?? BorderRadius.circular(8),
+        borderRadius: radius,
+        splashColor: const Color(0xFF6EE7B7).withValues(alpha: 0.18),
+        highlightColor: const Color(0xFF6EE7B7).withValues(alpha: 0.08),
+        hoverColor: Colors.white.withValues(alpha: 0.06),
         mouseCursor:
             onTap == null ? SystemMouseCursors.basic : SystemMouseCursors.click,
         child: Padding(
@@ -182,79 +192,128 @@ class WebNavbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 36, // slim — hugs the text line (was 52)
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.centerLeft,
-          end: Alignment.centerRight,
-          colors: FunspotGradients.navbar,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF059669).withValues(alpha: 0.25),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        border: const Border(
-          bottom: BorderSide(
-            color: Color(0x33FFD166),
-            width: 1,
-          ),
-        ),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 12), // was 16
-      child: Row(
-        children: [
-          // 1. App name / logo
-          _buildLogo(),
-          const SizedBox(width: 10), // was 14
-
-          if (isLoggedIn && _hasProfileInfo) ...[
-            _buildProfileInfo(),
-            const SizedBox(width: 10), // was 14
-          ],
-
-          // 2. All-channels carousel — sized to its content (not stretched
-          //    across the whole Row anymore), still auto-scrolls internally
-          //    if it has more items than fit in the cap.
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: _ChannelCarousel(
-              channels: allChannels,
-              memberChannelIds: _memberChannelIds,
-              joiningChannelIds: joiningChannelIds,
-              isLoggedIn: isLoggedIn,
-              onJoinChannel: _handleJoinChannel,
-              onChannelTap: onChannelSelected,
-              onShowLoginModal: onShowLoginModal,
+    return ClipRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+        child: Container(
+          height: 48,
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+              colors: FunspotGradients.navbar,
             ),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF03140E).withValues(alpha: 0.55),
+                blurRadius: 20,
+                offset: const Offset(0, 6),
+              ),
+              BoxShadow(
+                color: const Color(0xFF34D399).withValues(alpha: 0.10),
+                blurRadius: 30,
+                offset: const Offset(0, 2),
+              ),
+            ],
           ),
+          child: Stack(
+            children: [
+              // Glass sheen — soft light strip along the very top edge.
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: Container(
+                  height: 14,
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: FunspotGradients.glassSheen,
+                    ),
+                  ),
+                ),
+              ),
 
-          // ✅ Real spacer — absorbs whatever space is left so the entire
-          // right-hand cluster (search, my channels, +, bell, avatar) stays
-          // glued together and pinned flush against the right edge no
-          // matter the screen width or how many carousel/channel chips
-          // exist.
-          const Spacer(),
+              // Content row.
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 18),
+                child: Row(
+                  children: [
+                    // 1. App name / logo
+                    _buildLogo(),
+                    const SizedBox(width: 16),
 
-          // 3. Search bar
-          _buildSearch(),
-          const SizedBox(width: 8), // was 12
+                    if (isLoggedIn && _hasProfileInfo) ...[
+                      _buildProfileInfo(),
+                      const SizedBox(width: 16),
+                    ],
 
-          // 4. The user's own joined channels — capped so it can never
-          //    push notification/avatar off-screen; scrolls internally.
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 260),
-            child: _buildUserChannels(context),
+                    // 2. All-channels carousel — sized to its content, not
+                    //    stretched across the whole Row, still auto-scrolls
+                    //    internally if it has more items than fit in the cap.
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 420),
+                      child: _ChannelCarousel(
+                        channels: allChannels,
+                        memberChannelIds: _memberChannelIds,
+                        joiningChannelIds: joiningChannelIds,
+                        isLoggedIn: isLoggedIn,
+                        onJoinChannel: _handleJoinChannel,
+                        onChannelTap: onChannelSelected,
+                        onShowLoginModal: onShowLoginModal,
+                      ),
+                    ),
+
+                    // ✅ Real spacer — absorbs whatever space is left so the
+                    // entire right-hand cluster stays glued together and
+                    // pinned flush against the right edge.
+                    const Spacer(),
+
+                    // 3. Search bar
+                    _buildSearch(),
+                    const SizedBox(width: 12),
+
+                    // 4. The user's own joined channels — capped so it can
+                    //    never push notification/avatar off-screen.
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 260),
+                      child: _buildUserChannels(context),
+                    ),
+                    const SizedBox(width: 12),
+
+                    _buildNotificationIcon(),
+                    const SizedBox(width: 12),
+                    _buildAvatar(),
+                  ],
+                ),
+              ),
+
+              // Bottom accent line — a jewel-toned gradient hairline instead
+              // of a flat solid border, brighter at the center.
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Container(
+                  height: 1.4,
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        Color(0x00F5B841),
+                        Color(0x99FFD166),
+                        Color(0xFFF5B841),
+                        Color(0x99FFD166),
+                        Color(0x00F5B841),
+                      ],
+                      stops: [0.0, 0.28, 0.5, 0.72, 1.0],
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 8), // was 12
-
-          _buildNotificationIcon(),
-          const SizedBox(width: 8), // was 12
-          _buildAvatar(),
-        ],
+        ),
       ),
     );
   }
@@ -273,76 +332,97 @@ class WebNavbar extends StatelessWidget {
   }
 
   // ==========================================================================
-  // LOGO — circular with border
+  // LOGO — circular mark with a soft gradient ring and glow
   // ==========================================================================
   Widget _buildLogo() {
     return Row(
       children: [
         Container(
-          width: 24, // was 32
-          height: 24,
+          width: 30,
+          height: 30,
+          padding: const EdgeInsets.all(1.6),
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.16),
-              width: 1,
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: FunspotGradients.logo,
             ),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF34D399).withValues(alpha: 0.45),
+                blurRadius: 10,
+                spreadRadius: 0.5,
+              ),
+            ],
           ),
           child: ClipOval(
             child: Container(
-              color: const Color(0xFF0B3D2E),
-              padding: const EdgeInsets.all(
-                  3), // small inset so the mark doesn't touch the ring
+              color: const Color(0xFF07291E),
+              padding: const EdgeInsets.all(4.5),
               child: Image.asset(
                 'assets/icons/funspot.png',
                 fit: BoxFit.contain,
                 errorBuilder: (context, error, stackTrace) => const Icon(
                   Icons.sports_soccer,
-                  color: Color(0xFF34D399),
-                  size: 14,
+                  color: Color(0xFF6EE7B7),
+                  size: 15,
                 ),
               ),
             ),
           ),
         ),
-        const SizedBox(width: 8), // was 10
+        const SizedBox(width: 10),
         ShaderMask(
           shaderCallback: (bounds) => const LinearGradient(
-            colors: [Colors.white, Color(0xFFDFF7EA)],
+            colors: [Colors.white, Color(0xFFE3FBEF)],
           ).createShader(bounds),
           child: const Text(
             'Funspot',
             style: TextStyle(
-              fontSize: 14, // was 16
+              fontSize: 16,
               fontWeight: FontWeight.w800,
               color: Colors.white,
-              letterSpacing: -0.4,
-              height: 1, // no extra line-height above/below glyphs
+              letterSpacing: -0.2,
+              height: 1,
+              shadows: [
+                Shadow(
+                  color: Color(0x40000000),
+                  offset: Offset(0, 1),
+                  blurRadius: 2,
+                ),
+              ],
             ),
           ),
         ),
         Container(
-          margin: const EdgeInsets.only(left: 5),
-          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+          margin: const EdgeInsets.only(left: 7),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
           decoration: BoxDecoration(
             gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
               colors: FunspotGradients.gold,
             ),
-            borderRadius: BorderRadius.circular(5),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.35),
+              width: 0.6,
+            ),
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFFF5B841).withValues(alpha: 0.4),
-                blurRadius: 5,
+                color: const Color(0xFFF5B841).withValues(alpha: 0.55),
+                blurRadius: 8,
               ),
             ],
           ),
           child: const Text(
             'BETA',
             style: TextStyle(
-              fontSize: 7,
+              fontSize: 7.5,
               fontWeight: FontWeight.w800,
               color: Color(0xFF0B3D2E),
-              letterSpacing: 1,
+              letterSpacing: 1.1,
               height: 1,
             ),
           ),
@@ -352,18 +432,24 @@ class WebNavbar extends StatelessWidget {
   }
 
   // ==========================================================================
-  // PROFILE INFO — nickname / team / country
+  // PROFILE INFO — nickname / team / country, glass pill with soft border
   // ==========================================================================
   Widget _buildProfileInfo() {
     return Container(
-      padding:
-          const EdgeInsets.symmetric(horizontal: 10, vertical: 2), // was 12/5
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(8),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white.withValues(alpha: 0.09),
+            Colors.white.withValues(alpha: 0.03),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: Colors.white.withValues(alpha: 0.14),
-          width: 0.7,
+          color: Colors.white.withValues(alpha: 0.16),
+          width: 0.8,
         ),
       ),
       child: Row(
@@ -371,20 +457,20 @@ class WebNavbar extends StatelessWidget {
         children: [
           if (nickname != null && nickname!.isNotEmpty)
             _buildProfileInfoItem(
-              icon: Icons.shield_outlined,
+              icon: Icons.shield_rounded,
               value: nickname!,
             ),
           if (teamName != null && teamName!.isNotEmpty) ...[
             _buildProfileInfoDivider(),
             _buildProfileInfoItem(
-              icon: Icons.sports_soccer_outlined,
+              icon: Icons.sports_soccer_rounded,
               value: teamName!,
             ),
           ],
           if (country != null && country!.isNotEmpty) ...[
             _buildProfileInfoDivider(),
             _buildProfileInfoItem(
-              icon: Icons.flag_outlined,
+              icon: Icons.flag_rounded,
               value: country!,
             ),
           ],
@@ -400,14 +486,14 @@ class WebNavbar extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 10, color: const Color(0xFF6EE7B7)), // was 11
-        const SizedBox(width: 4),
+        Icon(icon, size: 12, color: const Color(0xFFFFD166)),
+        const SizedBox(width: 5),
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 100),
           child: Text(
             value,
             style: const TextStyle(
-              fontSize: 11,
+              fontSize: 11.5,
               fontWeight: FontWeight.w600,
               color: Colors.white,
               height: 1,
@@ -422,10 +508,20 @@ class WebNavbar extends StatelessWidget {
 
   Widget _buildProfileInfoDivider() {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 8),
+      margin: const EdgeInsets.symmetric(horizontal: 9),
       width: 1,
-      height: 10, // was 12
-      color: Colors.white.withValues(alpha: 0.18),
+      height: 12,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.white.withValues(alpha: 0.0),
+            Colors.white.withValues(alpha: 0.28),
+            Colors.white.withValues(alpha: 0.0),
+          ],
+        ),
+      ),
     );
   }
 
@@ -444,12 +540,12 @@ class WebNavbar extends StatelessWidget {
           Text(
             'No channels joined',
             style: FanTypography.caption.copyWith(
-              color: Colors.white.withValues(alpha: 0.7),
+              color: Colors.white.withValues(alpha: 0.65),
               fontSize: 11,
               height: 1,
             ),
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: 8),
           _buildCreateChip(),
         ],
       );
@@ -484,13 +580,25 @@ class WebNavbar extends StatelessWidget {
     final leader = sortedMembers.isNotEmpty ? sortedMembers.first : null;
 
     return Container(
-      padding: EdgeInsets.zero, // was 2/2 — no extra chrome around the chip
+      decoration: BoxDecoration(
+        color: isSelected
+            ? const Color(0xFF6EE7B7).withValues(alpha: 0.14)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        border: isSelected
+            ? Border.all(
+                color: const Color(0xFF6EE7B7).withValues(alpha: 0.35),
+                width: 0.8,
+              )
+            : null,
+      ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           if (channel.isAdmin) ...[
+            const SizedBox(width: 6),
             const Text('👑', style: TextStyle(fontSize: 10)),
-            const SizedBox(width: 3),
+            const SizedBox(width: 2),
           ],
 
           // ✅ Tap channel name -> open chat (also marks it selected)
@@ -499,15 +607,18 @@ class WebNavbar extends StatelessWidget {
               onChannelSelected(channel);
               onOpenChat?.call(channel);
             },
-            borderRadius: BorderRadius.circular(6),
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            borderRadius: BorderRadius.circular(8),
+            padding: EdgeInsets.symmetric(
+              horizontal: channel.isAdmin ? 4 : 8,
+              vertical: 5,
+            ),
             child: Text(
               channel.name,
               style: TextStyle(
                 fontSize: 12,
-                fontWeight: FontWeight.w600,
+                fontWeight: FontWeight.w700,
                 color: isSelected ? const Color(0xFF6EE7B7) : Colors.white,
-                decoration: isSelected ? TextDecoration.underline : null,
+                letterSpacing: -0.1,
                 height: 1,
               ),
             ),
@@ -515,25 +626,44 @@ class WebNavbar extends StatelessWidget {
 
           // ✅ Tap leader badge -> open leaderboard
           if (leader != null) ...[
-            const SizedBox(width: 4),
+            const SizedBox(width: 2),
             _WebTappable(
               onTap: () => onOpenLeaderboard?.call(channel),
-              borderRadius: BorderRadius.circular(6),
-              padding: EdgeInsets.zero,
+              borderRadius: BorderRadius.circular(7),
+              padding: const EdgeInsets.only(right: 6),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
                 decoration: BoxDecoration(
-                  gradient: const LinearGradient(colors: FunspotGradients.gold),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  '${leader.username} (${leader.seasonPoints}pts)',
-                  style: const TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF0B3D2E),
-                    height: 1,
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: FunspotGradients.gold,
                   ),
+                  borderRadius: BorderRadius.circular(7),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFFF5B841).withValues(alpha: 0.35),
+                      blurRadius: 5,
+                    ),
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.emoji_events_rounded,
+                        size: 9, color: Color(0xFF0B3D2E)),
+                    const SizedBox(width: 3),
+                    Text(
+                      '${leader.username} · ${leader.seasonPoints}',
+                      style: const TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF0B3D2E),
+                        height: 1,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -547,54 +677,81 @@ class WebNavbar extends StatelessWidget {
     // No cap anymore — always tappable.
     return _WebTappable(
       onTap: onCreateChannel,
-      borderRadius: BorderRadius.circular(14),
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-      child: const Icon(
-        Icons.add_rounded,
-        size: 14,
-        color: Color(0xFF6EE7B7),
+      borderRadius: BorderRadius.circular(16),
+      padding: const EdgeInsets.all(2),
+      child: Container(
+        width: 22,
+        height: 22,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: Colors.white.withValues(alpha: 0.08),
+          border: Border.all(
+            color: const Color(0xFF6EE7B7).withValues(alpha: 0.4),
+            width: 0.8,
+          ),
+        ),
+        child: const Icon(
+          Icons.add_rounded,
+          size: 15,
+          color: Color(0xFF6EE7B7),
+        ),
       ),
     );
   }
 
   // ==========================================================================
-  // SEARCH
+  // SEARCH — glass pill with a softly lit border
   // ==========================================================================
   Widget _buildSearch() {
     return Container(
-      width: 150, // was 180
-      height: 24, // was 32 — just enough for the single text line
+      width: 168,
+      height: 30,
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.16),
-          width: 0.7,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white.withValues(alpha: 0.10),
+            Colors.white.withValues(alpha: 0.04),
+          ],
         ),
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.18),
+          width: 0.8,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.15),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: TextField(
         style: const TextStyle(
           fontWeight: FontWeight.w600,
-          fontSize: 12,
+          fontSize: 12.5,
           color: Colors.white,
           height: 1,
         ),
+        cursorColor: const Color(0xFF6EE7B7),
         decoration: InputDecoration(
           isDense: true,
-          hintText: 'Search...',
+          hintText: 'Search…',
           hintStyle: TextStyle(
-            color: Colors.white.withValues(alpha: 0.55),
-            fontSize: 12,
+            color: Colors.white.withValues(alpha: 0.5),
+            fontSize: 12.5,
             fontWeight: FontWeight.w500,
             height: 1,
           ),
-          prefixIcon: Icon(
-            Icons.search,
-            size: 14,
-            color: Colors.white.withValues(alpha: 0.6),
+          prefixIcon: const Icon(
+            Icons.search_rounded,
+            size: 16,
+            color: Color(0xFF6EE7B7),
           ),
           prefixIconConstraints:
-              const BoxConstraints(minWidth: 28, minHeight: 14),
+              const BoxConstraints(minWidth: 32, minHeight: 16),
           border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(vertical: 0),
         ),
@@ -603,37 +760,66 @@ class WebNavbar extends StatelessWidget {
   }
 
   // ==========================================================================
-  // NOTIFICATIONS — plain bell icon
+  // NOTIFICATIONS — bell with a soft glow halo and glossy badge
   // ==========================================================================
   Widget _buildNotificationIcon() {
+    final bool hasNotifications = notificationCount > 0;
     return _WebTappable(
       onTap: onNotificationTap,
-      borderRadius: BorderRadius.circular(14),
-      padding: EdgeInsets.zero, // was 4 — icon sits flush, no padding halo
+      borderRadius: BorderRadius.circular(16),
+      padding: const EdgeInsets.all(6),
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          const Icon(
-            Icons.notifications_none_outlined,
-            size: 18, // was 20
-            color: Colors.white,
+          Container(
+            decoration: hasNotifications
+                ? BoxDecoration(
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFFFFD166).withValues(alpha: 0.35),
+                        blurRadius: 10,
+                        spreadRadius: 1,
+                      ),
+                    ],
+                  )
+                : null,
+            child: Icon(
+              hasNotifications
+                  ? Icons.notifications_rounded
+                  : Icons.notifications_none_rounded,
+              size: 19,
+              color: Colors.white,
+            ),
           ),
-          if (notificationCount > 0)
+          if (hasNotifications)
             Positioned(
-              top: -2,
-              right: -4,
+              top: -3,
+              right: -5,
               child: Container(
                 padding: const EdgeInsets.all(3),
-                constraints: const BoxConstraints(minWidth: 14, minHeight: 14),
-                decoration: const BoxDecoration(
-                  color: Colors.red,
+                constraints: const BoxConstraints(minWidth: 15, minHeight: 15),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFFFF6B6B), Color(0xFFE0303A)],
+                  ),
                   shape: BoxShape.circle,
+                  border: Border.all(
+                    color: const Color(0xFF07291E),
+                    width: 1.4,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFFE0303A).withValues(alpha: 0.5),
+                      blurRadius: 4,
+                    ),
+                  ],
                 ),
                 child: Text(
                   notificationCount > 99 ? '99+' : notificationCount.toString(),
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 7,
+                    fontSize: 7.5,
                     fontWeight: FontWeight.w800,
                     height: 1,
                   ),
@@ -647,33 +833,42 @@ class WebNavbar extends StatelessWidget {
   }
 
   // ==========================================================================
-  // AVATAR — circular with border, loads a real placeholder photo
+  // AVATAR — circular photo with a two-tone gradient ring and glow
   // ==========================================================================
   Widget _buildAvatar() {
     return _WebTappable(
       onTap: onMenuTap,
-      borderRadius: BorderRadius.circular(13),
+      borderRadius: BorderRadius.circular(19),
+      padding: const EdgeInsets.all(1),
       child: Container(
-        width: 26, // was 34 — matches the slimmer bar height
-        height: 26,
+        width: 32,
+        height: 32,
+        padding: const EdgeInsets.all(1.8),
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          border: Border.all(
-            color: Colors.white.withValues(alpha: 0.16),
-            width: 1,
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: FunspotGradients.avatarRing,
           ),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFFFFD166).withValues(alpha: 0.35),
+              blurRadius: 8,
+            ),
+          ],
         ),
         child: ClipOval(
           child: isLoggedIn
               ? Image.network(
                   _avatarUrlFor(userId),
                   fit: BoxFit.cover,
-                  width: 26,
-                  height: 26,
+                  width: 28,
+                  height: 28,
                   loadingBuilder: (context, child, progress) {
                     if (progress == null) return child;
                     return Container(
-                      color: const Color(0xFF0B3D2E),
+                      color: const Color(0xFF07291E),
                       child: const Center(
                         child: SizedBox(
                           width: 12,
@@ -688,20 +883,20 @@ class WebNavbar extends StatelessWidget {
                     );
                   },
                   errorBuilder: (context, error, stackTrace) => Container(
-                    color: const Color(0xFF0B3D2E),
+                    color: const Color(0xFF07291E),
                     child: const Icon(
-                      Icons.person_outline,
+                      Icons.person_rounded,
                       color: Colors.white,
-                      size: 14,
+                      size: 15,
                     ),
                   ),
                 )
               : Container(
-                  color: const Color(0xFF0B3D2E),
+                  color: const Color(0xFF07291E),
                   child: const Icon(
-                    Icons.person_outline,
+                    Icons.person_rounded,
                     color: Colors.white,
-                    size: 14,
+                    size: 15,
                   ),
                 ),
         ),
@@ -713,12 +908,10 @@ class WebNavbar extends StatelessWidget {
 // ============================================================================
 // CHANNEL CAROUSEL
 // ----------------------------------------------------------------------------
-// Auto-scrolling, unstyled (no background/border) horizontal list of every
-// channel — name, current top leader, and a Join button for channels the
-// user hasn't joined. Sized to its content (capped by the parent's
-// ConstrainedBox) rather than stretching across the whole Row, so it no
-// longer leaves a dead empty gap before the search bar. Manual horizontal
-// drag still works.
+// Auto-scrolling, softly-lit pill list of every channel — name, current top
+// leader, and a Join button for channels the user hasn't joined. Sized to
+// its content (capped by the parent's ConstrainedBox) rather than
+// stretching across the whole Row. Manual horizontal drag still works.
 // ============================================================================
 
 class _ChannelCarousel extends StatefulWidget {
@@ -805,7 +998,7 @@ class _ChannelCarouselState extends State<_ChannelCarousel> {
       return Text(
         'No channels available',
         style: FanTypography.caption.copyWith(
-          color: Colors.white.withValues(alpha: 0.7),
+          color: Colors.white.withValues(alpha: 0.65),
           fontSize: 11,
           height: 1,
         ),
@@ -813,11 +1006,9 @@ class _ChannelCarouselState extends State<_ChannelCarousel> {
     }
 
     // Shrink-wraps to its content (up to the parent's maxWidth cap) instead
-    // of an Expanded/SizedBox(width: double.infinity) that stretched across
-    // the whole Row and left a visible dead gap when there weren't enough
-    // channels to fill it.
+    // of stretching across the whole Row.
     return SizedBox(
-      height: 24, // was 32 — just the text line
+      height: 28,
       child: ListView.builder(
         controller: _scrollController,
         scrollDirection: Axis.horizontal,
@@ -869,71 +1060,107 @@ class _CarouselEntry extends StatelessWidget {
       ..sort((a, b) => b.seasonPoints.compareTo(a.seasonPoints));
     final leader = sortedMembers.isNotEmpty ? sortedMembers.first : null;
 
-    // No background color or border here by design — just plain content,
-    // inked via _WebTappable so clicks/hover still register on web.
-    return _WebTappable(
-      onTap: onTap,
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            channel.name,
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: Colors.white,
-              height: 1,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 3),
+      child: _WebTappable(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(9),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(9),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.08),
+              width: 0.7,
             ),
           ),
-          if (leader != null) ...[
-            const SizedBox(width: 5),
-            const Icon(Icons.emoji_events, size: 11, color: Color(0xFFF5B841)),
-            const SizedBox(width: 3),
-            Text(
-              leader.username,
-              style: const TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFFFFE08A),
-                height: 1,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                channel.name,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                  letterSpacing: -0.1,
+                  height: 1,
+                ),
               ),
-            ),
-          ],
-          if (!isMember) ...[
-            const SizedBox(width: 6),
-            _WebTappable(
-              onTap: () {
-                // Check if user is logged in before allowing join
-                if (!isLoggedIn) {
-                  onShowLoginModal?.call();
-                  return;
-                }
-                onJoin();
-              },
-              padding: EdgeInsets.zero,
-              child: isJoining
-                  ? const SizedBox(
-                      width: 11,
-                      height: 11,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 1.5,
-                        valueColor: AlwaysStoppedAnimation(Color(0xFF34D399)),
-                      ),
-                    )
-                  : const Text(
-                      'Join',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                        color: Color(0xFF6EE7B7),
-                        decoration: TextDecoration.underline,
-                        height: 1,
-                      ),
-                    ),
-            ),
-          ],
-        ],
+              if (leader != null) ...[
+                const SizedBox(width: 6),
+                const Icon(Icons.emoji_events_rounded,
+                    size: 11, color: Color(0xFFFFD166)),
+                const SizedBox(width: 3),
+                Text(
+                  leader.username,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFFFFE08A),
+                    height: 1,
+                  ),
+                ),
+              ],
+              if (!isMember) ...[
+                const SizedBox(width: 7),
+                _WebTappable(
+                  onTap: () {
+                    // Check if user is logged in before allowing join
+                    if (!isLoggedIn) {
+                      onShowLoginModal?.call();
+                      return;
+                    }
+                    onJoin();
+                  },
+                  borderRadius: BorderRadius.circular(6),
+                  padding: EdgeInsets.zero,
+                  child: isJoining
+                      ? const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 3),
+                          child: SizedBox(
+                            width: 11,
+                            height: 11,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.5,
+                              valueColor:
+                                  AlwaysStoppedAnimation(Color(0xFF34D399)),
+                            ),
+                          ),
+                        )
+                      : Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 7, vertical: 2.5),
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(
+                              colors: FunspotGradients.logo,
+                            ),
+                            borderRadius: BorderRadius.circular(6),
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(0xFF34D399)
+                                    .withValues(alpha: 0.4),
+                                blurRadius: 5,
+                              ),
+                            ],
+                          ),
+                          child: const Text(
+                            'Join',
+                            style: TextStyle(
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF07291E),
+                              height: 1,
+                            ),
+                          ),
+                        ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }

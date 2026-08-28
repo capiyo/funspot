@@ -12,6 +12,8 @@ import '../WebView/Hompage/main_content_tabs.dart';
 import '../pages/fixture_page.dart' hide ToastHelper;
 import "../pages/posts_page.dart";
 import '../modals/homepage/notifications_modal.dart';
+import 'dart:js_interop';
+import 'package:web/web.dart' as web;
 import '../pages/logs.dart';
 import '../modals/Funzy/leaderboard.dart';
 import '../../models/user_channel.dart';
@@ -44,7 +46,9 @@ class _HomePageWebState extends State<HomePageWeb> {
   int _notificationCount = 0;
   int _pendingJoinCount = 0;
   Set<String> _pendingJoinRequests = {};
+  web.EventListener? _visibilityListener;
   Timer? _badgePollTimer;
+  bool _loadAllDataInFlight = false;
 
   final PageController _arenaPageController = PageController();
   final PageController _feedPageController = PageController();
@@ -83,6 +87,17 @@ class _HomePageWebState extends State<HomePageWeb> {
     _loadStoredNotifications();
     _subscribeToNotifications();
     _startBadgePolling();
+
+    // ✅ listen for the tab going background/foreground so the poll
+    // timer isn't burning requests/CPU while nobody's looking at the page.
+    _visibilityListener = ((web.Event _) {
+      if (web.document.visibilityState == 'visible') {
+        _onTabVisible();
+      } else {
+        _onTabHidden();
+      }
+    }).toJS;
+    web.document.addEventListener('visibilitychange', _visibilityListener);
   }
 
   @override
@@ -90,7 +105,13 @@ class _HomePageWebState extends State<HomePageWeb> {
     _authService.removeListener(_onAuthStateChanged);
     _notificationSubscription?.cancel();
     _badgeStreamSubscription?.cancel();
-     _badgePollTimer?.cancel();
+    _badgePollTimer?.cancel();
+
+    if (_visibilityListener != null) {
+      web.document.removeEventListener('visibilitychange', _visibilityListener);
+      _visibilityListener = null;
+    }
+
     super.dispose();
   }
 
@@ -103,19 +124,62 @@ class _HomePageWebState extends State<HomePageWeb> {
       _loadPendingJoinRequests();
     }
   }
-    void _startBadgePolling() {
+
+  void _onTabHidden() {
     _badgePollTimer?.cancel();
-    _badgePollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
-      if (!mounted || !_isLoggedIn) return;
-      final adminChannelIds = _userChannels
-          .where((c) => c.isAdmin)
-          .map((c) => c.channelId)
-          .toList();
-      NotificationService.reconcileFromServer(
-        userId: _authService.userId ?? '',
-        authToken: _authService.authToken,
-        adminChannelIds: adminChannelIds,
-      );
+    _badgePollTimer = null;
+    debugPrint('⏸️ Tab hidden — badge polling paused');
+  }
+
+  void _onTabVisible() {
+    if (!mounted || !_isLoggedIn) return;
+    debugPrint('▶️ Tab visible — badge polling resumed');
+
+    final adminChannelIds =
+        _userChannels.where((c) => c.isAdmin).map((c) => c.channelId).toList();
+    NotificationService.reconcileFromServer(
+      userId: _authService.userId ?? '',
+      authToken: _authService.authToken,
+      adminChannelIds: adminChannelIds,
+    );
+
+    // ✅ Also reconcile this user's OWN pending-join status on return —
+    // covers the case where a join_approved/join_rejected push was
+    // missed while the tab was hidden.
+    _loadPendingJoinRequests();
+
+    _startBadgePolling();
+  }
+
+  void _startBadgePolling() {
+    _badgePollTimer?.cancel();
+
+    bool inFlight = false;
+    _badgePollTimer = Timer.periodic(const Duration(seconds: 15), (_) async {
+      if (!mounted || !_isLoggedIn || inFlight) return;
+      inFlight = true;
+      try {
+        final adminChannelIds = _userChannels
+            .where((c) => c.isAdmin)
+            .map((c) => c.channelId)
+            .toList();
+        await NotificationService.reconcileFromServer(
+          userId: _authService.userId ?? '',
+          authToken: _authService.authToken,
+          adminChannelIds: adminChannelIds,
+        );
+
+        // ✅ NEW — reconcile the requester's own pending-join state too.
+        // Fixes the bug where an approved/rejected user's client stays
+        // stuck showing "pending" if the realtime push was dropped
+        // (backgrounded tab, flaky socket, reconnect race). This poll
+        // self-corrects every 15s regardless of what the websocket did.
+        await _loadPendingJoinRequests();
+      } catch (e) {
+        debugPrint('⚠️ Badge reconcile failed: $e');
+      } finally {
+        inFlight = false;
+      }
     });
   }
 
@@ -142,8 +206,6 @@ class _HomePageWebState extends State<HomePageWeb> {
 
     if (notificationType == 'join_request') {
       final channelId = data['channel_id']?.toString() ?? '';
-      final channelName = data['channel_name']?.toString() ?? 'Unknown Channel';
-      final username = data['username']?.toString() ?? 'Someone';
 
       setState(() {
         if (channelId.isNotEmpty) {
@@ -154,13 +216,11 @@ class _HomePageWebState extends State<HomePageWeb> {
       });
 
       _savePendingJoinRequests();
-
       return;
     }
 
     if (notificationType == 'join_approved') {
       final channelId = data['channel_id']?.toString() ?? '';
-      final channelName = data['channel_name']?.toString() ?? 'Unknown Channel';
 
       setState(() {
         if (channelId.isNotEmpty) {
@@ -173,13 +233,11 @@ class _HomePageWebState extends State<HomePageWeb> {
 
       _savePendingJoinRequests();
       _loadAllData();
-
       return;
     }
 
     if (notificationType == 'join_rejected') {
       final channelId = data['channel_id']?.toString() ?? '';
-      final channelName = data['channel_name']?.toString() ?? 'Unknown Channel';
 
       setState(() {
         if (channelId.isNotEmpty) {
@@ -191,11 +249,9 @@ class _HomePageWebState extends State<HomePageWeb> {
       });
 
       _savePendingJoinRequests();
-
       return;
     }
 
-    // Add to notification list
     _addToNotificationList({
       'type': notificationType,
       'title': message['title'] ?? 'Notification',
@@ -205,9 +261,8 @@ class _HomePageWebState extends State<HomePageWeb> {
       'isUnread': true,
     });
   }
-  
 
-    void _handleBadgeUpdate(Map<String, dynamic> event) {
+  void _handleBadgeUpdate(Map<String, dynamic> event) {
     if (!mounted) return;
 
     final type = event['type'] as String?;
@@ -217,19 +272,17 @@ class _HomePageWebState extends State<HomePageWeb> {
       if (channelId.isNotEmpty) {
         setState(() {
           _pendingJoinRequests.add(channelId);
-          _pendingJoinCount = (_pendingJoinCount ?? 0) + 1;
-          _notificationCount = (_notificationCount ?? 0) + 1;
+          _pendingJoinCount = (_pendingJoinCount) + 1;
+          _notificationCount = (_notificationCount) + 1;
         });
         _savePendingJoinRequests();
       }
     } else if (type == 'pending_join_count_sync') {
-  final total = event['total_pending_joins'] as int? ?? 0;
-  setState(() {
-    _pendingJoinCount = total;
-  });
-}
-    
-     else if (type == 'join_approved' || type == 'join_rejected') {
+      final total = event['total_pending_joins'] as int? ?? 0;
+      setState(() {
+        _pendingJoinCount = total;
+      });
+    } else if (type == 'join_approved' || type == 'join_rejected') {
       final channelId = event['channel_id']?.toString() ?? '';
       if (channelId.isNotEmpty) {
         setState(() {
@@ -252,30 +305,12 @@ class _HomePageWebState extends State<HomePageWeb> {
         _hasUnreadNotifications = false;
       });
     } else if (type == 'comment_badge_update') {
-      // ✅ NEW — was missing entirely. NotificationService emits this type
-      // for vote_supporter/vote_rival/fixture_comment AND (after the fix
-      // above) vote.cast/pledge.create/bet.matched/bet.settled. Without
-      // this branch every one of those silently fell through and never
-      // touched _notificationCount, so the bell never moved for them.
       final total = event['total_unread_comments'] as int? ?? 0;
       setState(() {
         _notificationCount = total;
         _hasUnreadNotifications = total > 0;
       });
     }
-  }
-
-  void _addToNotificationList(Map<String, dynamic> notification) {
-    setState(() {
-      _notifications.insert(0, notification);
-      if (_notifications.length > 50) {
-        _notifications = _notifications.take(50).toList();
-      }
-      _notificationCount =
-          _notifications.where((n) => n['isUnread'] == true).length;
-      _hasUnreadNotifications = _notificationCount > 0;
-    });
-    _saveNotifications();
   }
 
   Future<void> _loadStoredNotifications() async {
@@ -298,12 +333,27 @@ class _HomePageWebState extends State<HomePageWeb> {
     } catch (e) {}
   }
 
+  void _addToNotificationList(Map<String, dynamic> notification) {
+    setState(() {
+      _notifications.insert(0, notification);
+      if (_notifications.length > 50) {
+        _notifications = _notifications.take(50).toList();
+      }
+      _notificationCount =
+          _notifications.where((n) => n['isUnread'] == true).length;
+      _hasUnreadNotifications = _notificationCount > 0;
+    });
+    _saveNotifications();
+  }
+
   Future<void> _saveNotifications() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('notifications', jsonEncode(_notifications));
-      await prefs.setInt('notificationCount', _notificationCount);
-    } catch (e) {}
+    DiskWriteScheduler.schedule('web_notifications_disk', () async {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('notifications', jsonEncode(_notifications));
+        await prefs.setInt('notificationCount', _notificationCount);
+      } catch (e) {}
+    });
   }
 
   Future<void> _loadPendingJoinRequests() async {
@@ -325,24 +375,25 @@ class _HomePageWebState extends State<HomePageWeb> {
   }
 
   Future<void> _savePendingJoinRequests() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final requests = _pendingJoinRequests
-          .map((id) => {
-                'channel_id': id,
-                'timestamp': DateTime.now().toIso8601String(),
-              })
-          .toList();
-      await prefs.setString('pending_join_requests', jsonEncode(requests));
-    } catch (e) {
-      debugPrint('Failed to save pending join requests: $e');
-    }
+    DiskWriteScheduler.schedule('web_pending_join_requests_disk', () async {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final requests = _pendingJoinRequests
+            .map((id) => {
+                  'channel_id': id,
+                  'timestamp': DateTime.now().toIso8601String(),
+                })
+            .toList();
+        await prefs.setString('pending_join_requests', jsonEncode(requests));
+      } catch (e) {
+        debugPrint('Failed to save pending join requests: $e');
+      }
+    });
   }
 
   // ==========================================================================
-// HANDLE OPEN LEADERBOARD — mirrors mobile home_page.dart's
-// _showChannelLeaderboard exactly (opens ComradeModal, selects channel first)
-// ==========================================================================
+  // HANDLE OPEN LEADERBOARD
+  // ==========================================================================
   void _handleOpenLeaderboard(UserChannel channel) {
     print('🏆 Leaderboard tap on channel: ${channel.name}');
 
@@ -351,7 +402,6 @@ class _HomePageWebState extends State<HomePageWeb> {
       return;
     }
 
-    // Select the channel first, same as mobile.
     _handleChannelSelected(channel);
 
     if (_isModalOpen) return;
@@ -423,21 +473,15 @@ class _HomePageWebState extends State<HomePageWeb> {
           _saveNotifications();
         },
         onNotificationTap: (tapped) {
-          Navigator.pop(context); // close the modal first
+          Navigator.pop(context);
           _routeNotificationTap(tapped);
         },
       ),
     );
   }
 
-  /// Optional routing — sends the user somewhere useful depending on the
-  /// notification type. Safe to leave as a no-op stub for types you don't
-  /// want to route yet; extend as needed.
   void _routeNotificationTap(Map<String, dynamic> tapped) {
     final type = tapped['type']?.toString() ?? '';
-    final data = tapped['data'] is Map
-        ? Map<String, dynamic>.from(tapped['data'])
-        : <String, dynamic>{};
 
     switch (type) {
       case 'comrade_added':
@@ -445,8 +489,6 @@ class _HomePageWebState extends State<HomePageWeb> {
         break;
       case 'channel_invite':
       case 'join_link':
-        // channel_id available in `data['channel_id']` if you want to
-        // navigate straight into that channel's chat.
         break;
       default:
         break;
@@ -455,10 +497,7 @@ class _HomePageWebState extends State<HomePageWeb> {
 
   void _showPendingRequestsModal() {
     if (_isModalOpen || !mounted) return;
-
-    if (_pendingJoinCount == 0) {
-      return;
-    }
+    if (_pendingJoinCount == 0) return;
 
     _isModalOpen = true;
 
@@ -471,10 +510,13 @@ class _HomePageWebState extends State<HomePageWeb> {
         username: _authService.username ?? '',
         authToken: _authService.authToken,
         userChannels: _userChannels,
-        onRequestProcessed: () {
-          _loadPendingJoinRequests();
-          _loadAllData();
-          setState(() {});
+        // ✅ Real async reload: pending list, channel membership/AppCache,
+        // and a setState — so the admin's own view reflects the approval
+        // immediately instead of relying on cache.
+        onRequestProcessed: () async {
+          await _loadPendingJoinRequests();
+          await _refreshChannelsInBackground();
+          if (mounted) setState(() {});
         },
       ),
     ).then((_) {
@@ -644,7 +686,7 @@ class _HomePageWebState extends State<HomePageWeb> {
   }
 
   // ==========================================================================
-  // MODAL SHOW METHODS - FULL IMPLEMENTATION
+  // MODAL SHOW METHODS
   // ==========================================================================
   void _showMyProfile() {
     if (!_isLoggedIn) {
@@ -723,7 +765,6 @@ class _HomePageWebState extends State<HomePageWeb> {
       return;
     }
 
-    // Block channel creation once user already belongs to 3 groups
     if (_userChannels.length >= MAX_CHANNELS) {
       return;
     }
@@ -777,17 +818,14 @@ class _HomePageWebState extends State<HomePageWeb> {
   // ==========================================================================
   // DATA LOADING METHODS
   // ==========================================================================
-  //
-  // ✅ REWRITTEN to mirror mobile's home_page.dart pattern exactly:
-  //   - Cache shown instantly (AppCache.channels) when available.
-  //   - Real revalidation always goes through AppCache.refreshChannels,
-  //     never a raw http.get to /channels/user/$userId.
-  //   - Browsable-channel rules (MAX_CHANNELS / TARGET_DISPLAY_COUNT) are
-  //     applied in one shared place (_applyJoinedChannels) so cache and
-  //     network paths can't drift apart.
-  // ==========================================================================
 
   Future<void> _loadAllData() async {
+    if (_loadAllDataInFlight) {
+      print('⏭️ _loadAllData already in flight, skipping duplicate call');
+      return;
+    }
+    _loadAllDataInFlight = true;
+
     print('🔄 _loadAllData: Starting...');
     print('   isLoggedIn: $_isLoggedIn');
 
@@ -798,6 +836,7 @@ class _HomePageWebState extends State<HomePageWeb> {
           excludeIds: const {},
           limit: TARGET_DISPLAY_COUNT,
         );
+        if (!mounted) return;
         setState(() {
           _userChannels = [];
           _allChannels = browsable;
@@ -808,33 +847,27 @@ class _HomePageWebState extends State<HomePageWeb> {
         return;
       }
 
-      // ✅ Cache-first: show whatever AppCache already has instantly.
       if (AppCache.channels.isNotEmpty) {
         final cached = List<UserChannel>.from(AppCache.channels);
         await _applyJoinedChannels(cached);
         if (mounted) setState(() => _isLoading = false);
 
-        // Cache might be stale — always revalidate in the background.
         await _refreshChannelsInBackground();
         return;
       }
 
-      // No cache at all — go straight to network.
       setState(() => _isLoading = true);
       await _refreshChannelsInBackground();
     } catch (e) {
       print('❌ Error loading data: $e');
     } finally {
+      _loadAllDataInFlight = false;
       if (mounted) {
         setState(() => _isLoading = false);
       }
     }
   }
 
-  /// ✅ Single source of truth for joined channels. Always goes through
-  /// AppCache.refreshChannels — this is what mobile's home_page.dart does
-  /// via its own _refreshChannelsInBackground(), and keeps web in sync
-  /// with whatever logic AppCache uses internally.
   Future<void> _refreshChannelsInBackground() async {
     final userId = _authService.userId ?? '';
     if (userId.isEmpty) return;
@@ -851,9 +884,6 @@ class _HomePageWebState extends State<HomePageWeb> {
     if (mounted) setState(() => _isLoading = false);
   }
 
-  /// Shared logic for applying the MAX_CHANNELS / browsable-fill rules
-  /// once we have a joined-channels list, whether it came from cache or
-  /// a fresh AppCache.refreshChannels() call.
   Future<void> _applyJoinedChannels(List<UserChannel> joined) async {
     if (joined.length >= MAX_CHANNELS) {
       setState(() {
@@ -875,7 +905,6 @@ class _HomePageWebState extends State<HomePageWeb> {
       });
     }
 
-    // If no channel is selected yet, select the first one.
     if (_selectedChannelId == null && _userChannels.isNotEmpty) {
       _selectedChannelId = _userChannels.first.channelId;
       _selectedChannel = _userChannels.first.name;
@@ -888,14 +917,6 @@ class _HomePageWebState extends State<HomePageWeb> {
 
   // ==========================================================================
   // API METHODS
-  // ==========================================================================
-  //
-  // ⚠️ NOTE: _fetchUserChannelsFromApi has been REMOVED. It used to call
-  // GET /channels/user/$userId directly, bypassing AppCache entirely, which
-  // is what caused web to show only 1 joined channel while mobile (which
-  // always reads through AppCache.channels) showed the correct count.
-  // All joined-channel reads now go through AppCache — see
-  // _refreshChannelsInBackground() above.
   // ==========================================================================
 
   Future<List<UserChannel>> _fetchBrowsableChannels({
@@ -932,95 +953,91 @@ class _HomePageWebState extends State<HomePageWeb> {
       print('❌ _fetchBrowsableChannels error: $e');
     }
 
-    // Fallback: best-effort from AppCache, still excluding joined ones.
     return AppCache.channels
         .where((c) => !excludeIds.contains(c.channelId))
         .take(limit)
         .toList();
   }
 
- Future<bool> _joinChannelApi(String userId, String channelId) async {
-  print('🌐 _joinChannelApi: userId: $userId, channelId: $channelId');
-  try {
-    final headers = {'Content-Type': 'application/json'};
-    final token = _authService.authToken;
-    if (token != null && token.isNotEmpty) {
-      headers['Authorization'] = 'Bearer $token';
+  Future<bool> _joinChannelApi(String userId, String channelId) async {
+    print('🌐 _joinChannelApi: userId: $userId, channelId: $channelId');
+    try {
+      final headers = {'Content-Type': 'application/json'};
+      final token = _authService.authToken;
+      if (token != null && token.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $token';
+      }
+
+      final response = await http
+          .post(
+            Uri.parse('$API_BASE_URL/channels/members/add'),
+            headers: headers,
+            body: json.encode({
+              'channel_id': channelId,
+              'members': [
+                {'user_id': userId, 'username': _authService.username ?? ''},
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 10));
+
+      return response.statusCode == 200 || response.statusCode == 201;
+    } catch (e) {
+      print('❌ _joinChannelApi error: $e');
+      return false;
     }
-
-    final response = await http
-        .post(
-          Uri.parse('$API_BASE_URL/channels/members/add'),
-          headers: headers,
-          body: json.encode({
-            'channel_id': channelId,
-            'members': [
-              {'user_id': userId, 'username': _authService.username ?? ''},
-            ],
-          }),
-        )
-        .timeout(const Duration(seconds: 10));
-
-    return response.statusCode == 200 || response.statusCode == 201;
-  } catch (e) {
-    print('❌ _joinChannelApi error: $e');
-    return false;
   }
-}
+
   // ==========================================================================
   // EVENT HANDLERS
   // ==========================================================================
 
   Future<void> _handleJoinChannel(UserChannel channel) async {
-  print('🔗 _handleJoinChannel: ${channel.name}');
+    print('🔗 _handleJoinChannel: ${channel.name}');
 
-  if (!_isLoggedIn) {
-    _showLoginModal();
-    return;
-  }
-
-  // ✅ Don't join a channel that already has a pending request.
-  if (_pendingJoinRequests.contains(channel.channelId)) {
-    return;
-  }
-
-  // ✅ Double-tap guard — mirrors mobile's _joinChannelDirectly.
-  if (_joiningChannelIds.contains(channel.channelId)) {
-    return;
-  }
-
-  setState(() {
-    _joiningChannelIds.add(channel.channelId);
-  });
-
-  try {
-    final success = await _joinChannelApi(
-      _authService.userId ?? '',
-      channel.channelId,
-    );
-
-    if (success && mounted) {
-      // ✅ Revalidate through AppCache instead of a full _loadAllData(),
-      // which used to just re-read the same stale source. This mirrors
-      // mobile's _joinChannelDirectly -> _refreshChannelsInBackground.
-      await _refreshChannelsInBackground();
-      _loadPendingJoinRequests();
-    } else if (mounted) {
-      //ToastHelper.showError('Failed to join channel', context: context);
+    if (!_isLoggedIn) {
+      _showLoginModal();
+      return;
     }
-  } catch (e) {
-    print('❌ Join channel error: $e');
-    if (mounted) {
-      //ToastHelper.showError('Error: $e', context: context);
+
+    if (_pendingJoinRequests.contains(channel.channelId)) {
+      return;
     }
-  } finally {
-    if (mounted) {
-      setState(() {
-        _joiningChannelIds.remove(channel.channelId);
-      });
+
+    if (_joiningChannelIds.contains(channel.channelId)) {
+      return;
+    }
+
+    setState(() {
+      _joiningChannelIds.add(channel.channelId);
+    });
+
+    try {
+      final success = await _joinChannelApi(
+        _authService.userId ?? '',
+        channel.channelId,
+      );
+
+      if (success && mounted) {
+        await _refreshChannelsInBackground();
+        _loadPendingJoinRequests();
+      } else if (mounted) {
+        ToastHelper.showError('Failed to join channel');
+      }
+    } catch (e) {
+      print('❌ Join channel error: $e');
+      if (mounted) {
+        ToastHelper.showError('Error joining channel');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _joiningChannelIds.remove(channel.channelId);
+        });
+      }
     }
   }
-}
+
   void _handleChannelSelected(UserChannel channel) {
     print('📌 _handleChannelSelected: ${channel.name}');
     setState(() {
@@ -1062,7 +1079,7 @@ class _HomePageWebState extends State<HomePageWeb> {
   }
 
   // ==========================================================================
-  // HANDLE OPEN CHAT - WITH WIDE SCREEN CONDITIONAL
+  // HANDLE OPEN CHAT
   // ==========================================================================
 
   Future<void> _handleOpenChat(UserChannel channel) async {
@@ -1195,7 +1212,6 @@ class _HomePageWebState extends State<HomePageWeb> {
             nickname: null,
             teamName: null,
             country: null,
-            // ✅ Pass the login modal trigger to the navbar
             onShowLoginModal: _showLoginModal,
           ),
           Expanded(
@@ -1256,7 +1272,11 @@ class PendingRequestsModal extends StatefulWidget {
   final String username;
   final String? authToken;
   final List<UserChannel> userChannels;
-  final VoidCallback onRequestProcessed;
+
+  /// ✅ CHANGED from VoidCallback to Future<void> Function() so the caller
+  /// (HomePageWeb) can `await` the reload chain (pending list + channel
+  /// membership refresh) before this modal's `.then()` fires again.
+  final Future<void> Function() onRequestProcessed;
 
   const PendingRequestsModal({
     super.key,
@@ -1278,6 +1298,7 @@ class _PendingRequestsModalState extends State<PendingRequestsModal> {
   String? _processingUserId;
   String? _processingChannelId;
 
+  static const int MAX_CHANNELS = 3;
   static const String API_BASE_URL = 'https://clash-api-m5mr.onrender.com/api';
 
   @override
@@ -1330,6 +1351,77 @@ class _PendingRequestsModalState extends State<PendingRequestsModal> {
     }
   }
 
+  /// Best-effort check of how many channels the target user is currently
+  /// in, so an admin can't approve someone straight past the cap.
+  /// Returns -1 if the check itself fails (treated as "unknown" — approval
+  /// is allowed to proceed rather than silently blocking on a flaky call).
+Future<int> _getUserChannelCount(String userId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$API_BASE_URL/channels/user/$userId/count'),
+        headers: {
+          'Authorization': 'Bearer ${widget.authToken}',
+          'Content-Type': 'application/json',
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        // ⚠️ confirm the actual response shape server-side — assuming either
+        // a bare int body or {"count": N}. Adjust the parse to match.
+        if (data is int) return data;
+        if (data is Map && data['count'] != null) {
+          return (data['count'] as num).toInt();
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ _getUserChannelCount error: $e');
+    }
+    return -1;
+  }
+
+  /// Explicitly notify the requester of the outcome. If your backend
+  /// already fires this from the approve/reject endpoints, this becomes a
+  /// harmless duplicate — kept in place because relying solely on the
+  /// server-side push was what caused the "still shows pending" bug.
+  Future<bool> _notifyUser({
+    required String userId,
+    required String channelId,
+    required String channelName,
+    required String notificationType, // 'join_approved' | 'join_rejected'
+    required String title,
+    required String body,
+  }) async {
+    try {
+      final response = await http
+          .post(
+            // ⚠️ confirm this router is actually mounted at /api/notifications
+            // in your main router setup — I'm inferring it from the file name,
+            // not from a nest() call I've seen.
+            Uri.parse('$API_BASE_URL/notifications/send'),
+            headers: {
+              'Authorization': 'Bearer ${widget.authToken}',
+              'Content-Type': 'application/json',
+            },
+            body: json.encode({
+              'user_id': userId,
+              'notification_type': notificationType,
+              'title': title,
+              'body': body,
+              'data': {
+                'channel_id': channelId,
+                'channel_name': channelName,
+              },
+            }),
+          )
+          .timeout(const Duration(seconds: 10));
+      return response.statusCode == 200 || response.statusCode == 201;
+    } catch (e) {
+      debugPrint('❌ _notifyUser error: $e');
+      return false;
+    }
+  }
+
   Future<void> _approveRequest(
       String channelId, String userId, String username) async {
     if (_isProcessing) return;
@@ -1341,6 +1433,27 @@ class _PendingRequestsModalState extends State<PendingRequestsModal> {
     });
 
     try {
+      // Verify the requester isn't already at the channel cap before
+      // approving. If they are, auto-reject instead of approving them into
+      // a state the app can't display.
+      final currentCount = await _getUserChannelCount(userId);
+      if (currentCount >= MAX_CHANNELS) {
+        ToastHelper.showWarning(
+          '$username is already in $MAX_CHANNELS channels — auto-rejecting',
+        );
+        await _rejectRequest(channelId, userId, username, silent: true);
+        return; // _rejectRequest's finally block resets _isProcessing
+      }
+
+      final channelName = widget.userChannels
+          .firstWhere((c) => c.channelId == channelId,
+              orElse: () => UserChannel(
+                  channelId: channelId,
+                  name: 'Unknown',
+                  memberCount: 0,
+                  season: ''))
+          .name;
+
       final response = await http
           .post(
             Uri.parse('$API_BASE_URL/channels/approve-request'),
@@ -1365,10 +1478,28 @@ class _PendingRequestsModalState extends State<PendingRequestsModal> {
           }
         });
 
-        widget.onRequestProcessed();
+      final notified = await _notifyUser(
+          userId: userId,
+          channelId: channelId,
+          channelName: channelName,
+          notificationType: 'join_approved',
+          title: 'Join request approved',
+          body: 'You\'ve been approved to join $channelName',
+        );
+
+        ToastHelper.showSuccess(
+          notified
+              ? '$username approved'
+              : '$username approved (notification may be delayed)',
+        );
+
+        // ✅ reload pending list + channel membership on the admin's side
+        await widget.onRequestProcessed();
+      } else {
+        ToastHelper.showError('Failed to approve $username');
       }
     } catch (e) {
-      // Approve failed
+      ToastHelper.showError('Error approving request');
     } finally {
       if (mounted) {
         setState(() {
@@ -1381,16 +1512,31 @@ class _PendingRequestsModalState extends State<PendingRequestsModal> {
   }
 
   Future<void> _rejectRequest(
-      String channelId, String userId, String username) async {
-    if (_isProcessing) return;
+    String channelId,
+    String userId,
+    String username, {
+    bool silent = false, // true when called internally by the auto-reject path
+  }) async {
+    if (_isProcessing && !silent) return;
 
-    setState(() {
-      _isProcessing = true;
-      _processingUserId = userId;
-      _processingChannelId = channelId;
-    });
+    if (!silent) {
+      setState(() {
+        _isProcessing = true;
+        _processingUserId = userId;
+        _processingChannelId = channelId;
+      });
+    }
 
     try {
+      final channelName = widget.userChannels
+          .firstWhere((c) => c.channelId == channelId,
+              orElse: () => UserChannel(
+                  channelId: channelId,
+                  name: 'Unknown',
+                  memberCount: 0,
+                  season: ''))
+          .name;
+
       final response = await http
           .post(
             Uri.parse('$API_BASE_URL/channels/reject-request'),
@@ -1398,10 +1544,7 @@ class _PendingRequestsModalState extends State<PendingRequestsModal> {
               'Authorization': 'Bearer ${widget.authToken}',
               'Content-Type': 'application/json',
             },
-            body: json.encode({
-              'channel_id': channelId,
-              'user_id': userId,
-            }),
+            body: json.encode({'channel_id': channelId, 'user_id': userId}),
           )
           .timeout(const Duration(seconds: 10));
 
@@ -1414,10 +1557,29 @@ class _PendingRequestsModalState extends State<PendingRequestsModal> {
           }
         });
 
-        widget.onRequestProcessed();
+       final notified = await _notifyUser(
+          userId: userId,
+          channelId: channelId,
+          channelName: channelName,
+          notificationType: 'join_approved',
+          title: 'Join request approved',
+          body: 'You\'ve been approved to join $channelName',
+        );
+
+        if (!silent) {
+          ToastHelper.showSuccess(
+            notified
+                ? '$username rejected'
+                : '$username rejected (notification may be delayed)',
+          );
+        }
+
+        await widget.onRequestProcessed();
+      } else {
+        ToastHelper.showError('Failed to reject $username');
       }
     } catch (e) {
-      // Reject failed
+      ToastHelper.showError('Error rejecting request');
     } finally {
       if (mounted) {
         setState(() {
@@ -1626,63 +1788,85 @@ class _PendingRequestsModalState extends State<PendingRequestsModal> {
                                   ],
                                 ),
                               ),
-                              ...requests.map((request) => Container(
-                                    margin: const EdgeInsets.only(bottom: 8),
-                                    padding: const EdgeInsets.all(12),
-                                    decoration: BoxDecoration(
-                                      color: FanColors.surface,
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        Container(
-                                          width: 40,
-                                          height: 40,
-                                          decoration: BoxDecoration(
-                                            color: FanColors.primary
-                                                .withValues(alpha: 0.1),
-                                            shape: BoxShape.circle,
-                                          ),
-                                          child: Center(
-                                            child: Text(
-                                              request['username']?[0]
-                                                      ?.toUpperCase() ??
-                                                  '?',
-                                              style: TextStyle(
-                                                fontSize: 16,
-                                                fontWeight: FontWeight.bold,
-                                                color: FanColors.primary,
-                                              ),
+                              ...requests.map((request) {
+                                // ✅ per-row processing check so only the row
+                                // actually being processed shows a spinner.
+                                final isThisRowProcessing = _isProcessing &&
+                                    _processingUserId == request['user_id'] &&
+                                    _processingChannelId == channelId;
+
+                                return Container(
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: FanColors.surface,
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        width: 40,
+                                        height: 40,
+                                        decoration: BoxDecoration(
+                                          color: FanColors.primary
+                                              .withValues(alpha: 0.1),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: Center(
+                                          child: Text(
+                                            (request['username'] as String?)
+                                                        ?.isNotEmpty ==
+                                                    true
+                                                ? request['username'][0]
+                                                    .toUpperCase()
+                                                : '?',
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.bold,
+                                              color: FanColors.primary,
                                             ),
                                           ),
                                         ),
-                                        const SizedBox(width: 12),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                request['username'],
-                                                style: const TextStyle(
-                                                  fontSize: 14,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: Colors.white,
-                                                ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              request['username'],
+                                              style: const TextStyle(
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w600,
+                                                color: Colors.white,
                                               ),
-                                              const SizedBox(height: 2),
-                                              Text(
-                                                DateHelper.formatTimeAgo(
-                                                    request['requested_at']),
-                                                style: TextStyle(
-                                                  fontSize: 11,
-                                                  color: Colors.white
-                                                      .withValues(alpha: 0.4),
-                                                ),
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              DateHelper.formatTimeAgo(
+                                                  request['requested_at']),
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                color: Colors.white
+                                                    .withValues(alpha: 0.4),
                                               ),
-                                            ],
-                                          ),
+                                            ),
+                                          ],
                                         ),
+                                      ),
+                                      if (isThisRowProcessing)
+                                        const Padding(
+                                          padding: EdgeInsets.symmetric(
+                                              horizontal: 8),
+                                          child: SizedBox(
+                                            width: 18,
+                                            height: 18,
+                                            child: CircularProgressIndicator(
+                                                strokeWidth: 2),
+                                          ),
+                                        )
+                                      else
                                         Row(
                                           children: [
                                             GestureDetector(
@@ -1732,9 +1916,10 @@ class _PendingRequestsModalState extends State<PendingRequestsModal> {
                                             ),
                                           ],
                                         ),
-                                      ],
-                                    ),
-                                  )),
+                                    ],
+                                  ),
+                                );
+                              }),
                               const SizedBox(height: 8),
                               Divider(height: 1, color: FanColors.border),
                             ],

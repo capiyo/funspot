@@ -1,5 +1,6 @@
 // ============================================================
 // HISTORY PAGE - Aftermatch Only with Voter List + Comments
+// Redesigned: slim, minimal, backgroundless-text UI
 // ============================================================
 
 import 'dart:async';
@@ -139,8 +140,8 @@ class HistoryItem {
   final String fixtureId;
   final String channelId;
   final String channelName;
-   final String homeTeam;
-  final  String awayTeam;
+  final String homeTeam;
+  final String awayTeam;
   final String matchName;
   DateTime lastActivity;
   String lastMessage;
@@ -150,9 +151,9 @@ class HistoryItem {
   int commentCount;
   final DateTime? matchTime;
   final String league;
-   int homeScore;
-   int awayScore;
-   String status;
+  int homeScore;
+  int awayScore;
+  String status;
   final String? winner;
   List<fixture_models.Voter> voters;
   List<FixtureComment> comments;
@@ -256,38 +257,73 @@ class HistoryItem {
 }
 
 // ============================================================
-// SPEECH BUBBLE CLIPPER
+// VOTER DOT — compact overlapping avatar, ring color = pick
 // ============================================================
 
-class _SpeechBubbleClipper extends CustomClipper<Path> {
-  @override
-  Path getClip(Size size) {
-    final path = Path();
-    final double radius = 16.0;
-    final double tailSize = 10.0;
-    final double tailPosition = size.width * 0.08;
+class _VoterDot extends StatelessWidget {
+  final fixture_models.Voter voter;
+  final bool isUser;
+  final String homeTeam;
+  final String awayTeam;
 
-    path.addRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(0, 0, size.width, size.height),
-        const Radius.circular(16),
+  const _VoterDot({
+    required this.voter,
+    required this.isUser,
+    required this.homeTeam,
+    required this.awayTeam,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final selectionDisplay = voter.selection == 'home_team'
+        ? homeTeam
+        : voter.selection == 'away_team'
+            ? awayTeam
+            : voter.selection == 'draw'
+                ? 'Draw'
+                : (voter.selection ?? '');
+    final color = voter.selection == 'home_team'
+        ? FanColors.primary
+        : voter.selection == 'away_team'
+            ? FanColors.away
+            : FanColors.draw;
+    final isWinner = voter.isCorrect == true;
+
+    return Tooltip(
+      message:
+          '${voter.userName} voted for $selectionDisplay${isWinner ? ' • Won' : ''}',
+      child: Container(
+        width: 20,
+        height: 20,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: FanColors.surface,
+          border: Border.all(
+            color: isWinner ? FanColors.primary : color.withOpacity(0.5),
+            width: isWinner ? 1.5 : 1,
+          ),
+        ),
+        child: Center(
+          child: Text(
+            isUser
+                ? 'Y'
+                : (voter.userName.isNotEmpty
+                    ? voter.userName[0].toUpperCase()
+                    : '?'),
+            style: TextStyle(
+              fontSize: 8.5,
+              fontWeight: FontWeight.w700,
+              color: isWinner ? FanColors.primary : color,
+            ),
+          ),
+        ),
       ),
     );
-
-    path.moveTo(tailPosition, size.height);
-    path.lineTo(tailPosition - tailSize, size.height + tailSize);
-    path.lineTo(tailPosition + tailSize, size.height + tailSize);
-    path.close();
-
-    return path;
   }
-
-  @override
-  bool shouldReclip(covariant CustomClipper<Path> oldClipper) => false;
 }
 
 // ============================================================
-// SPEECH BUBBLE INPUT
+// SLIM COMMENT INPUT — backgroundless, underline style
 // ============================================================
 
 class _SpeechBubbleInput extends StatefulWidget {
@@ -311,12 +347,17 @@ class _SpeechBubbleInput extends StatefulWidget {
 
 class _SpeechBubbleInputState extends State<_SpeechBubbleInput> {
   bool _hasText = false;
+  final FocusNode _focusNode = FocusNode();
+  bool _focused = false;
 
   @override
   void initState() {
     super.initState();
     _hasText = widget.controller.text.trim().isNotEmpty;
     widget.controller.addListener(_updateHasText);
+    _focusNode.addListener(() {
+      if (mounted) setState(() => _focused = _focusNode.hasFocus);
+    });
   }
 
   void _updateHasText() {
@@ -331,145 +372,82 @@ class _SpeechBubbleInputState extends State<_SpeechBubbleInput> {
   @override
   void dispose() {
     widget.controller.removeListener(_updateHasText);
+    _focusNode.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final Color inputBg = FanColors.isDark
-        ? Color.alphaBlend(
-            Colors.white.withValues(alpha: 0.04), FanColors.inputSurface)
-        : FanColors.surface;
+    final Color lineColor = widget.enabled
+        ? (_focused
+            ? FanColors.primary.withValues(alpha: 0.5)
+            : FanColors.border.withValues(alpha: 0.25))
+        : FanColors.border.withValues(alpha: 0.12);
 
-    final Color inputBgDisabled = FanColors.isDark
-        ? Color.alphaBlend(
-            Colors.white.withValues(alpha: 0.015), FanColors.inputSurface)
-        : FanColors.surface.withValues(alpha: 0.4);
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        Container(
-          width: 28,
-          height: 28,
-          decoration: BoxDecoration(
-            color: FanColors.primary.withValues(alpha: 0.1),
-            shape: BoxShape.circle,
-            border: Border.all(
-              color: FanColors.primary.withValues(alpha: 0.2),
-              width: 1.5,
-            ),
-          ),
-          child: Center(
-            child: Text(
-              widget.controller.text.isNotEmpty
-                  ? widget.controller.text[0].toUpperCase()
-                  : '?',
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 150),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: lineColor, width: 1)),
+      ),
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Expanded(
+            child: TextField(
+              controller: widget.controller,
+              focusNode: _focusNode,
+              enabled: widget.enabled,
               style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: FanColors.primary,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w400,
+                color: widget.enabled
+                    ? FanColors.textPrimary
+                    : FanColors.textTertiary.withValues(alpha: 0.6),
               ),
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: ClipPath(
-            clipper: _SpeechBubbleClipper(),
-            child: Container(
-              decoration: BoxDecoration(
-                color: widget.enabled ? inputBg : inputBgDisabled,
-                border: Border.all(
-                  color: widget.enabled
-                      ? FanColors.primary.withValues(alpha: 0.15)
-                      : FanColors.border.withValues(alpha: 0.1),
-                  width: widget.enabled ? 1.0 : 0.5,
+              decoration: InputDecoration(
+                hintText: widget.hintText,
+                hintStyle: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w400,
+                  color: FanColors.textTertiary.withValues(alpha: 0.6),
+                  fontStyle:
+                      widget.enabled ? FontStyle.normal : FontStyle.italic,
                 ),
-                boxShadow: widget.enabled
-                    ? [
-                        BoxShadow(
-                          color: FanColors.primary.withValues(alpha: 0.04),
-                          blurRadius: 8,
-                          offset: const Offset(0, 2),
-                        ),
-                      ]
-                    : null,
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                disabledBorder: InputBorder.none,
+                errorBorder: InputBorder.none,
+                focusedErrorBorder: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
               ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: widget.controller,
-                      enabled: widget.enabled,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w300,
-                        color: widget.enabled
-                            ? FanColors.primary
-                            : FanColors.primary.withValues(alpha: 0.4),
-                      ),
-                      decoration: InputDecoration(
-                        hintText: widget.hintText,
-                        hintStyle: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w300,
-                          color: FanColors.primary.withValues(alpha: 0.35),
-                          fontStyle: widget.enabled
-                              ? FontStyle.normal
-                              : FontStyle.italic,
-                        ),
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
-                        disabledBorder: InputBorder.none,
-                        errorBorder: InputBorder.none,
-                        focusedErrorBorder: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 10,
-                        ),
-                        isDense: true,
-                      ),
-                      maxLines: null,
-                      onChanged: (_) => setState(() {}),
-                      onSubmitted: (value) {
-                        final trimmed = value.trim();
-                        if (widget.enabled && trimmed.isNotEmpty) {
-                          widget.onSubmitted?.call(trimmed);
-                          widget.controller.clear();
-                        }
-                      },
-                    ),
-                  ),
-                  if (widget.enabled && _hasText)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 4),
-                      child: GestureDetector(
-                        onTap: widget.onSend,
-                        child: Container(
-                          width: 28,
-                          height: 28,
-                          decoration: BoxDecoration(
-                            color: FanColors.primary,
-                            shape: BoxShape.circle,
-                          ),
-                          child: Center(
-                            child: Icon(
-                              Icons.send_rounded,
-                              size: 14,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
+              maxLines: null,
+              onChanged: (_) => setState(() {}),
+              onSubmitted: (value) {
+                final trimmed = value.trim();
+                if (widget.enabled && trimmed.isNotEmpty) {
+                  widget.onSubmitted?.call(trimmed);
+                  widget.controller.clear();
+                }
+              },
             ),
           ),
-        ),
-      ],
+          if (widget.enabled && _hasText)
+            GestureDetector(
+              onTap: widget.onSend,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 8, bottom: 1),
+                child: Icon(
+                  Icons.arrow_upward_rounded,
+                  size: 16,
+                  color: FanColors.primary,
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -619,31 +597,31 @@ class _HistoryPageState extends State<HistoryPage>
     if (mounted) setState(() {});
   }
 
- @override
-void didChangeAppLifecycleState(AppLifecycleState state) {
-  super.didChangeAppLifecycleState(state);
-  if (state == AppLifecycleState.resumed) {
-    debugPrint('🔄 App resumed - refreshing data');
-    _loadLiveGamesFromCache();
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      debugPrint('🔄 App resumed - refreshing data');
+      _loadLiveGamesFromCache();
 
-    // ✅ Only force a network refetch if history data is actually stale —
-    // was previously unconditional, causing the same reload flash pattern.
-    final now = DateTime.now();
-    final isStale = _lastHistoryFetchTime == null ||
-        now.difference(_lastHistoryFetchTime!) > const Duration(minutes: 2);
-    _loadHistory(forceRefresh: isStale);
+      // ✅ Only force a network refetch if history data is actually stale —
+      // was previously unconditional, causing the same reload flash pattern.
+      final now = DateTime.now();
+      final isStale = _lastHistoryFetchTime == null ||
+          now.difference(_lastHistoryFetchTime!) > const Duration(minutes: 2);
+      _loadHistory(forceRefresh: isStale);
 
-    if (widget.isLoggedIn && !_wsConnected) {
-      _connectWebSocket();
+      if (widget.isLoggedIn && !_wsConnected) {
+        _connectWebSocket();
+      }
     }
   }
-}
 
   // ============================================================
   // WEB SOCKET CONNECTION
   // ============================================================
 
- void _connectWebSocket() {
+  void _connectWebSocket() {
     if (!widget.isLoggedIn) {
       debugPrint('🔌 Skipping WebSocket - not logged in');
       return;
@@ -674,47 +652,46 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
 
     // ✅ FIX: Pass the required arguments
     if (!ws.isConnected) {
-  final channelId = widget.userChannels.isNotEmpty
-      ? widget.userChannels.first.channelId
-      : null;
+      final channelId = widget.userChannels.isNotEmpty
+          ? widget.userChannels.first.channelId
+          : null;
 
-  ws.connect(
-    widget.userId,
-    widget.authToken ?? '',
-    channelId ?? '',
-    widget.username,
-  );
-} else {
-  _wsConnected = true;
-  _joinAllFixtureRooms();
-}
-
+      ws.connect(
+        widget.userId,
+        widget.authToken ?? '',
+        channelId ?? '',
+        widget.username,
+      );
+    } else {
+      _wsConnected = true;
+      _joinAllFixtureRooms();
+    }
 
     _setupWebSocketListeners();
   }
 
- void _joinAllFixtureRooms() {
-  final ws = WebSocketService();
-  if (!ws.isConnected) return;
+  void _joinAllFixtureRooms() {
+    final ws = WebSocketService();
+    if (!ws.isConnected) return;
 
-  for (var fixture in _liveGames) {
-    final item = _historyItems.firstWhere(
-      (h) => h.fixtureId == fixture.matchId,
-      orElse: () => HistoryItem.fromFixture(fixture),
-    );
-    final channelId = _resolveChannelIdFor(item);
-    if (channelId == null) continue;
-    ws.joinChannelFixtureRoom(channelId, fixtureId: fixture.matchId);
-  }
-
-  for (var item in _historyItems) {
-    if (item.status == 'live' || item.status == 'half_time') {
+    for (var fixture in _liveGames) {
+      final item = _historyItems.firstWhere(
+        (h) => h.fixtureId == fixture.matchId,
+        orElse: () => HistoryItem.fromFixture(fixture),
+      );
       final channelId = _resolveChannelIdFor(item);
       if (channelId == null) continue;
-      ws.joinChannelFixtureRoom(channelId, fixtureId: item.fixtureId);
+      ws.joinChannelFixtureRoom(channelId, fixtureId: fixture.matchId);
+    }
+
+    for (var item in _historyItems) {
+      if (item.status == 'live' || item.status == 'half_time') {
+        final channelId = _resolveChannelIdFor(item);
+        if (channelId == null) continue;
+        ws.joinChannelFixtureRoom(channelId, fixtureId: item.fixtureId);
+      }
     }
   }
-}
 
   // ============================================================
   // WEB SOCKET LISTENERS
@@ -722,14 +699,11 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
   bool _wsListenersSetup = false;
 
   void _setupWebSocketListeners() {
-
-
-      if (_wsListenersSetup) return;
+    if (_wsListenersSetup) return;
     _wsListenersSetup = true;
     final ws = WebSocketService();
 
     // Listen for new comments
-    
 
     // Listen for match status updates
     ws.on('match.status', (payload) {
@@ -884,7 +858,7 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
   // LOAD HISTORY
   // ============================================================
 
- DateTime? _lastHistoryFetchTime;
+  DateTime? _lastHistoryFetchTime;
 
   Future<void> _loadHistory({bool forceRefresh = false}) async {
     if (!mounted) return;
@@ -1171,98 +1145,98 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
   // LOAD COMMENTS FOR HISTORY ITEMS
   // ============================================================
 
- Future<void> _loadCommentsForHistoryItems(List<HistoryItem> items) async {
-  if (items.isEmpty) return;
+  Future<void> _loadCommentsForHistoryItems(List<HistoryItem> items) async {
+    if (items.isEmpty) return;
 
-  debugPrint('💬 Loading comments for ${items.length} history items...');
+    debugPrint('💬 Loading comments for ${items.length} history items...');
 
-  for (final item in items) {
-    // ✅ Resolve the same way posting/opening do — item.channelId alone
-    // may be empty, stale, or not one of the user's current channels.
-    final channelId = _resolveChannelIdFor(item);
-    if (channelId == null) continue;
+    for (final item in items) {
+      // ✅ Resolve the same way posting/opening do — item.channelId alone
+      // may be empty, stale, or not one of the user's current channels.
+      final channelId = _resolveChannelIdFor(item);
+      if (channelId == null) continue;
 
-    try {
-      final response = await http
-          .get(
-            Uri.parse(
-                '$API_BASE_URL/channels/$channelId/messages?fixture_id=${item.fixtureId}&limit=100'),
-            headers: widget.authToken != null && widget.authToken!.isNotEmpty
-                ? {'Authorization': 'Bearer ${widget.authToken}'}
-                : {},
-          )
-          .timeout(REQUEST_TIMEOUT);
+      try {
+        final response = await http
+            .get(
+              Uri.parse(
+                  '$API_BASE_URL/channels/$channelId/messages?fixture_id=${item.fixtureId}&limit=100'),
+              headers: widget.authToken != null && widget.authToken!.isNotEmpty
+                  ? {'Authorization': 'Bearer ${widget.authToken}'}
+                  : {},
+            )
+            .timeout(REQUEST_TIMEOUT);
 
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final messagesList = data['messages'] ?? [];
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          final messagesList = data['messages'] ?? [];
 
-        final List<FixtureComment> comments = [];
-        for (var msg in messagesList) {
-          String id = msg['message_id'] ?? '';
-          if (id.isEmpty) {
-            final idObj = msg['_id'];
-            if (idObj is Map && idObj['\$oid'] != null) {
-              id = idObj['\$oid'];
+          final List<FixtureComment> comments = [];
+          for (var msg in messagesList) {
+            String id = msg['message_id'] ?? '';
+            if (id.isEmpty) {
+              final idObj = msg['_id'];
+              if (idObj is Map && idObj['\$oid'] != null) {
+                id = idObj['\$oid'];
+              }
             }
-          }
 
-          DateTime timestamp;
-          final sentAt = msg['sent_at'];
-          if (sentAt is Map) {
-            final dateObj = sentAt['\$date'];
-            if (dateObj is Map && dateObj['\$numberLong'] != null) {
-              final milliseconds =
-                  int.parse(dateObj['\$numberLong'].toString());
-              timestamp = DateTime.fromMillisecondsSinceEpoch(milliseconds);
-            } else if (dateObj is String) {
-              timestamp = DateTime.parse(dateObj);
+            DateTime timestamp;
+            final sentAt = msg['sent_at'];
+            if (sentAt is Map) {
+              final dateObj = sentAt['\$date'];
+              if (dateObj is Map && dateObj['\$numberLong'] != null) {
+                final milliseconds =
+                    int.parse(dateObj['\$numberLong'].toString());
+                timestamp = DateTime.fromMillisecondsSinceEpoch(milliseconds);
+              } else if (dateObj is String) {
+                timestamp = DateTime.parse(dateObj);
+              } else {
+                timestamp = DateTime.now();
+              }
+            } else if (sentAt is String) {
+              timestamp = DateTime.parse(sentAt);
             } else {
               timestamp = DateTime.now();
             }
-          } else if (sentAt is String) {
-            timestamp = DateTime.parse(sentAt);
-          } else {
-            timestamp = DateTime.now();
+
+            comments.add(FixtureComment(
+              id: id,
+              userId: msg['sender_id']?.toString() ?? '',
+              username: msg['sender_name']?.toString() ?? 'Anonymous',
+              fixtureId: item.fixtureId,
+              comment: msg['text']?.toString() ?? '',
+              selection: msg['selection']?.toString(),
+              timestamp: timestamp,
+            ));
           }
 
-          comments.add(FixtureComment(
-            id: id,
-            userId: msg['sender_id']?.toString() ?? '',
-            username: msg['sender_name']?.toString() ?? 'Anonymous',
-            fixtureId: item.fixtureId,
-            comment: msg['text']?.toString() ?? '',
-            selection: msg['selection']?.toString(),
-            timestamp: timestamp,
-          ));
+          comments.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+
+          if (mounted) {
+            setState(() {
+              final index = _historyItems
+                  .indexWhere((h) => h.fixtureId == item.fixtureId);
+              if (index != -1) {
+                _historyItems[index].comments = comments;
+                _historyItems[index].commentCount = comments.length;
+                _fixtureComments[item.fixtureId] = comments;
+                _commentCounts[item.fixtureId] = comments.length;
+              }
+            });
+          }
+
+          debugPrint(
+              '✅ Loaded ${comments.length} comments for ${item.fixtureId}');
         }
-
-        comments.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-
-        if (mounted) {
-          setState(() {
-            final index = _historyItems
-                .indexWhere((h) => h.fixtureId == item.fixtureId);
-            if (index != -1) {
-              _historyItems[index].comments = comments;
-              _historyItems[index].commentCount = comments.length;
-              _fixtureComments[item.fixtureId] = comments;
-              _commentCounts[item.fixtureId] = comments.length;
-            }
-          });
-        }
-
-        debugPrint(
-            '✅ Loaded ${comments.length} comments for ${item.fixtureId}');
+      } catch (e) {
+        debugPrint('⚠️ Error loading comments for ${item.fixtureId}: $e');
       }
-    } catch (e) {
-      debugPrint('⚠️ Error loading comments for ${item.fixtureId}: $e');
     }
-  }
 
-  // Generate mock comments for items with no real comments
-  _generateMockCommentsForHistoryItems(items);
-}
+    // Generate mock comments for items with no real comments
+    _generateMockCommentsForHistoryItems(items);
+  }
 
   // ============================================================
   // GENERATE MOCK COMMENTS (like FixturesPage)
@@ -1341,7 +1315,7 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
   // CREATE COMMENT
   // ============================================================
 
- Future<void> _createComment(HistoryItem item, String commentText) async {
+  Future<void> _createComment(HistoryItem item, String commentText) async {
     final fixtureId = item.fixtureId;
 
     if (!widget.isLoggedIn) {
@@ -1532,117 +1506,117 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
   // OPEN CHAT
   // ============================================================
 
-Future<void> _openChat(HistoryItem item) async {
-  if (!widget.isLoggedIn) {
-    ToastHelper.showWarning('Log in to open this chat');
-    return;
-  }
-
-  fixture_models.Fixture? fixture;
-  for (final f in AppCache.fixtures) {
-    if (f.matchId == item.fixtureId) {
-      fixture = f;
-      break;
+  Future<void> _openChat(HistoryItem item) async {
+    if (!widget.isLoggedIn) {
+      ToastHelper.showWarning('Log in to open this chat');
+      return;
     }
-  }
 
-  fixture ??= fixture_models.Fixture(
-    id: item.fixtureId,
-    matchId: item.fixtureId,
-    homeTeam: item.homeTeam,
-    awayTeam: item.awayTeam,
-    league: item.league.isNotEmpty ? item.league : item.channelName,
-    homeWin: 0.0,
-    awayWin: 0.0,
-    draw: 0.0,
-    date: '',
-    time: '',
-    homeScore: item.homeScore,
-    awayScore: item.awayScore,
-    status: item.status,
-    isLive: false,
-    availableForVoting: false,
-    source: 'history',
-    scrapedAt: DateTime.now(),
-    dateIso: item.matchTime?.toIso8601String() ?? '',
-    result: item.winner,
-    votes: 0,
-    voters: const [],
-    pledges: 0,
-    pledgers: const [],
-    bets: 0,
-    bettors: const [],
-    subFixtures: const [],
-    timeElapsed: null,
-  );
+    fixture_models.Fixture? fixture;
+    for (final f in AppCache.fixtures) {
+      if (f.matchId == item.fixtureId) {
+        fixture = f;
+        break;
+      }
+    }
 
-  final userVoteSelection = AppCache.userVotes[item.fixtureId];
+    fixture ??= fixture_models.Fixture(
+      id: item.fixtureId,
+      matchId: item.fixtureId,
+      homeTeam: item.homeTeam,
+      awayTeam: item.awayTeam,
+      league: item.league.isNotEmpty ? item.league : item.channelName,
+      homeWin: 0.0,
+      awayWin: 0.0,
+      draw: 0.0,
+      date: '',
+      time: '',
+      homeScore: item.homeScore,
+      awayScore: item.awayScore,
+      status: item.status,
+      isLive: false,
+      availableForVoting: false,
+      source: 'history',
+      scrapedAt: DateTime.now(),
+      dateIso: item.matchTime?.toIso8601String() ?? '',
+      result: item.winner,
+      votes: 0,
+      voters: const [],
+      pledges: 0,
+      pledgers: const [],
+      bets: 0,
+      bettors: const [],
+      subFixtures: const [],
+      timeElapsed: null,
+    );
 
-  if (widget.userChannels.isEmpty) {
-    ToastHelper.showWarning('Join a channel first to chat');
-    return;
-  }
+    final userVoteSelection = AppCache.userVotes[item.fixtureId];
 
-  final String? channelId = _resolveChannelIdFor(item);
-  if (channelId == null) {
-    ToastHelper.showWarning('Join a channel first to chat');
-    return;
-  }
+    if (widget.userChannels.isEmpty) {
+      ToastHelper.showWarning('Join a channel first to chat');
+      return;
+    }
 
-  final channelName = widget.userChannels
-      .firstWhere(
-        (c) => c.channelId == channelId,
-        orElse: () => widget.userChannels.first,
-      )
-      .name;
+    final String? channelId = _resolveChannelIdFor(item);
+    if (channelId == null) {
+      ToastHelper.showWarning('Join a channel first to chat');
+      return;
+    }
 
-  final chatScreen = ChatScreen(
-    channelId: channelId,
-    fixtureId: item.fixtureId,
-    fixture: fixture,
-    userId: widget.userId,
-    username: widget.username,
-    authToken: widget.authToken,
-    isLoggedIn: widget.isLoggedIn,
-    comradesList: widget.userChannels.isNotEmpty ? {} : const {},
-    userVoteSelection: userVoteSelection,
-  );
+    final channelName = widget.userChannels
+        .firstWhere(
+          (c) => c.channelId == channelId,
+          orElse: () => widget.userChannels.first,
+        )
+        .name;
 
-  final double screenWidth = MediaQuery.of(context).size.width;
-  final bool isWideScreen = screenWidth >= 900;
+    final chatScreen = ChatScreen(
+      channelId: channelId,
+      fixtureId: item.fixtureId,
+      fixture: fixture,
+      userId: widget.userId,
+      username: widget.username,
+      authToken: widget.authToken,
+      isLoggedIn: widget.isLoggedIn,
+      comradesList: widget.userChannels.isNotEmpty ? {} : const {},
+      userVoteSelection: userVoteSelection,
+    );
 
-  final result = isWideScreen
-      ? await showDialog(
-          context: context,
-          barrierDismissible: true,
-          barrierColor: Colors.black.withOpacity(0.5),
-          builder: (dialogContext) => Dialog(
-            backgroundColor: Colors.transparent,
-            insetPadding: const EdgeInsets.symmetric(
-              horizontal: 80,
-              vertical: 40,
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: Container(
-                width: 480,
-                height: MediaQuery.of(context).size.height * 0.85,
-                constraints: const BoxConstraints(maxHeight: 900),
-                color: FanColors.background,
-                child: chatScreen,
+    final double screenWidth = MediaQuery.of(context).size.width;
+    final bool isWideScreen = screenWidth >= 900;
+
+    final result = isWideScreen
+        ? await showDialog(
+            context: context,
+            barrierDismissible: true,
+            barrierColor: Colors.black.withOpacity(0.5),
+            builder: (dialogContext) => Dialog(
+              backgroundColor: Colors.transparent,
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 80,
+                vertical: 40,
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  width: 480,
+                  height: MediaQuery.of(context).size.height * 0.85,
+                  constraints: const BoxConstraints(maxHeight: 900),
+                  color: FanColors.background,
+                  child: chatScreen,
+                ),
               ),
             ),
-          ),
-        )
-      : await Navigator.push(
-          context,
-          MaterialPageRoute(builder: (context) => chatScreen),
-        );
+          )
+        : await Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => chatScreen),
+          );
 
-  if (result == true) {
-    _loadHistory(forceRefresh: true);
+    if (result == true) {
+      _loadHistory(forceRefresh: true);
+    }
   }
-}
   // ============================================================
   // BUILD UI
   // ============================================================
@@ -1678,50 +1652,78 @@ Future<void> _openChat(HistoryItem item) async {
 
   Widget _buildHeader() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: FanColors.border.withOpacity(0.08),
+            width: 1,
+          ),
+        ),
+      ),
       child: Row(
         children: [
           _buildTabButton(
-            'History ${_historyItems.isNotEmpty ? "(${_historyItems.length})" : ""}',
-            _activeTab == 'history',
-          ),
-          const SizedBox(width: 8),
-          _buildTabButton(
-            'Live ${_liveGames.isNotEmpty ? "(${_liveGames.length})" : ""}',
-            _activeTab == 'live',
-          ),
+              'History', _historyItems.length, _activeTab == 'history'),
+          const SizedBox(width: 26),
+          _buildTabButton('Live', _liveGames.length, _activeTab == 'live'),
         ],
       ),
     );
   }
 
-  Widget _buildTabButton(String label, bool isActive) {
+  Widget _buildTabButton(String label, int count, bool isActive) {
     return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: () {
         setState(() {
-          _activeTab = label.contains('Live') ? 'live' : 'history';
+          _activeTab = label == 'Live' ? 'live' : 'history';
         });
       },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: isActive ? FanColors.primary : FanColors.surface,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: isActive
-                ? FanColors.primary
-                : FanColors.border.withOpacity(0.3),
-            width: isActive ? 0 : 1,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                  letterSpacing: 0.1,
+                  color:
+                      isActive ? FanColors.textPrimary : FanColors.textTertiary,
+                ),
+              ),
+              if (count > 0) ...[
+                const SizedBox(width: 5),
+                Text(
+                  '$count',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w500,
+                    color: isActive
+                        ? FanColors.primary
+                        : FanColors.textTertiary.withOpacity(0.6),
+                  ),
+                ),
+              ],
+            ],
           ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: isActive ? Colors.white : FanColors.textSecondary,
-            fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
-            fontSize: 13,
+          const SizedBox(height: 7),
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+            height: 2,
+            width: isActive ? 20 : 0,
+            decoration: BoxDecoration(
+              color: FanColors.primary,
+              borderRadius: BorderRadius.circular(1),
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -1760,17 +1762,17 @@ Future<void> _openChat(HistoryItem item) async {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           SizedBox(
-            width: 24,
-            height: 24,
+            width: 20,
+            height: 20,
             child: CircularProgressIndicator(
-              strokeWidth: 2,
+              strokeWidth: 1.75,
               color: FanColors.primary,
             ),
           ),
           const SizedBox(height: 10),
           Text(
             'Loading…',
-            style: TextStyle(color: FanColors.textSecondary, fontSize: 13),
+            style: TextStyle(color: FanColors.textSecondary, fontSize: 12.5),
           ),
         ],
       ),
@@ -1785,26 +1787,24 @@ Future<void> _openChat(HistoryItem item) async {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.history_toggle_off,
-                size: 40, color: FanColors.away.withOpacity(0.5)),
+                size: 34, color: FanColors.away.withOpacity(0.5)),
             const SizedBox(height: 12),
             Text(
               _error,
-              style: TextStyle(color: FanColors.textSecondary, fontSize: 14),
+              style: TextStyle(color: FanColors.textSecondary, fontSize: 13.5),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
-            TextButton(
-              onPressed: () => _loadHistory(forceRefresh: true),
-              style: TextButton.styleFrom(
-                backgroundColor: FanColors.primary,
-                foregroundColor: Colors.white,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
+            GestureDetector(
+              onTap: () => _loadHistory(forceRefresh: true),
+              child: Text(
+                'Retry',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                  color: FanColors.primary,
+                ),
               ),
-              child: const Text('Retry',
-                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
             ),
           ],
         ),
@@ -1820,13 +1820,13 @@ Future<void> _openChat(HistoryItem item) async {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.history,
-                size: 40, color: FanColors.textSecondary.withOpacity(0.3)),
+                size: 34, color: FanColors.textSecondary.withOpacity(0.3)),
             const SizedBox(height: 12),
             Text(
               'Nothing here yet',
               style: TextStyle(
                 color: FanColors.textPrimary,
-                fontSize: 15,
+                fontSize: 14.5,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -1835,23 +1835,20 @@ Future<void> _openChat(HistoryItem item) async {
               widget.isLoggedIn
                   ? 'Chats you join will show up here'
                   : 'Log in to see your past chats',
-              style: TextStyle(color: FanColors.textSecondary, fontSize: 13),
+              style: TextStyle(color: FanColors.textSecondary, fontSize: 12.5),
             ),
             const SizedBox(height: 16),
             if (!widget.isLoggedIn)
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                style: TextButton.styleFrom(
-                  backgroundColor: FanColors.primary,
-                  foregroundColor: Colors.white,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8)),
+              GestureDetector(
+                onTap: () => Navigator.pop(context),
+                child: Text(
+                  'Log In',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                    color: FanColors.primary,
+                  ),
                 ),
-                child: const Text('Log In',
-                    style:
-                        TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
               ),
           ],
         ),
@@ -1866,9 +1863,9 @@ Future<void> _openChat(HistoryItem item) async {
   Widget _buildHistoryList() {
     return ListView.separated(
       controller: widget.scrollController,
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
       itemCount: _historyItems.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      separatorBuilder: (_, __) => const SizedBox(height: 10),
       itemBuilder: (context, index) => _buildHistoryCard(_historyItems[index]),
     );
   }
@@ -1876,18 +1873,18 @@ Future<void> _openChat(HistoryItem item) async {
   Widget _buildLiveGamesList() {
     return ListView.separated(
       controller: widget.scrollController,
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
       itemCount: _liveGames.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      separatorBuilder: (_, __) => const SizedBox(height: 10),
       itemBuilder: (context, index) => _buildLiveCard(_liveGames[index]),
     );
   }
 
   // ============================================================
-  // HISTORY CARD WITH VOTERS AND COMMENTS
+  // HISTORY CARD — slim, backgroundless-text design
   // ============================================================
 
- Widget _buildHistoryCard(HistoryItem item) {
+  Widget _buildHistoryCard(HistoryItem item) {
     final unread = item.unreadCount > 0;
     final timeAgo = HistoryDateHelper.formatTimeAgo(item.lastActivity);
     final matchup = (item.homeTeam.isNotEmpty && item.awayTeam.isNotEmpty)
@@ -1934,44 +1931,32 @@ Future<void> _openChat(HistoryItem item) async {
       child: Container(
         decoration: BoxDecoration(
           color: FanColors.surface,
-          borderRadius: BorderRadius.circular(18),
-          boxShadow: [
-            BoxShadow(
-              color: FanColors.border.withOpacity(0.06),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-              spreadRadius: 0,
-            ),
-          ],
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: FanColors.border.withOpacity(0.08),
+            width: 1,
+          ),
         ),
         clipBehavior: Clip.antiAlias,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Header Row
+              // Header row
               Row(
                 children: [
-                  Container(
-                    width: 22,
-                    height: 22,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: FanColors.surfaceSunken,
-                      border: Border.all(
-                        color: FanColors.border.withOpacity(0.3),
-                        width: 1,
-                      ),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(11),
-                      child: Image.network(
-                        _getLeagueIcon(item.league),
-                        width: 18,
-                        height: 18,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) => Center(
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(9),
+                    child: Image.network(
+                      _getLeagueIcon(item.league),
+                      width: 16,
+                      height: 16,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) => SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: Center(
                           child: Text(
                             item.league.isNotEmpty
                                 ? item.league[0].toUpperCase()
@@ -1986,567 +1971,298 @@ Future<void> _openChat(HistoryItem item) async {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       matchup,
                       style: TextStyle(
-                        fontSize: 13.5,
+                        fontSize: 13,
                         fontWeight: unread ? FontWeight.w700 : FontWeight.w600,
                         color: unread
                             ? FanColors.textPrimary
                             : FanColors.textSecondary,
+                        letterSpacing: 0.1,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: FanColors.surfaceSunken,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      timeAgo,
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: FanColors.textTertiary,
-                        fontWeight: FontWeight.w500,
-                      ),
+                  Text(
+                    timeAgo,
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: FanColors.textTertiary,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 6),
 
-              // Scores
+              // Score — plain typographic score line, no boxes
               if (hasScores) ...[
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
-                  decoration: BoxDecoration(
-                    color: FanColors.surfaceSunken,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: FanColors.border.withOpacity(0.12),
-                      width: 0.5,
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        item.homeTeam,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: homeScore > awayScore
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                          color: homeScore > awayScore
+                              ? FanColors.textPrimary
+                              : FanColors.textSecondary,
+                        ),
+                        textAlign: TextAlign.right,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          item.homeTeam,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w400,
-                            color: FanColors.textSecondary,
-                          ),
-                          textAlign: TextAlign.right,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Text(
+                        '$homeScore : $awayScore',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.2,
+                          color: FanColors.textPrimary,
                         ),
                       ),
-                      const SizedBox(width: 10),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: FanColors.primary.withOpacity(0.06),
-                          borderRadius: BorderRadius.circular(6),
+                    ),
+                    Expanded(
+                      child: Text(
+                        item.awayTeam,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: awayScore > homeScore
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                          color: awayScore > homeScore
+                              ? FanColors.textPrimary
+                              : FanColors.textSecondary,
                         ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              '$homeScore',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w400,
-                                color: homeScore > awayScore
-                                    ? FanColors.primary
-                                    : FanColors.textPrimary,
-                              ),
-                            ),
-                            Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 4),
-                              child: Text(
-                                '-',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w300,
-                                  color: FanColors.textTertiary,
-                                ),
-                              ),
-                            ),
-                            Text(
-                              '$awayScore',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w400,
-                                color: awayScore > homeScore
-                                    ? FanColors.away
-                                    : FanColors.textPrimary,
-                              ),
-                            ),
-                          ],
-                        ),
+                        textAlign: TextAlign.left,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          item.awayTeam,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w400,
-                            color: FanColors.textSecondary,
-                          ),
-                          textAlign: TextAlign.left,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 8),
               ],
 
               // User vote result
               if (widget.isLoggedIn && userVote != null) ...[
-                if (userWon) ...[
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(vertical: 2, horizontal: 8),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.check_circle,
-                          size: 10,
-                          color: FanColors.primary,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          'You voted correctly!',
-                          style: TextStyle(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w400,
-                            color: FanColors.primary,
-                          ),
-                        ),
-                      ],
+                const SizedBox(height: 6),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      userWon ? Icons.check_circle : Icons.cancel,
+                      size: 11,
+                      color: userWon ? FanColors.primary : FanColors.away,
                     ),
-                  ),
-                ] else if (userLost) ...[
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(vertical: 2, horizontal: 8),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.close,
-                          size: 10,
-                          color: FanColors.away,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          'You lost this match',
-                          style: TextStyle(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w400,
-                            color: FanColors.away,
-                          ),
-                        ),
-                      ],
+                    const SizedBox(width: 4),
+                    Text(
+                      userWon ? 'You voted correctly' : 'You lost this one',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w500,
+                        color: userWon ? FanColors.primary : FanColors.away,
+                      ),
                     ),
-                  ),
-                ],
-                const SizedBox(height: 4),
+                  ],
+                ),
               ],
 
-              // Voters list
+              // Voters — compact overlapping avatars, no chip backgrounds
               if (widget.isLoggedIn) ...[
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
-                  decoration: BoxDecoration(
-                    color: FanColors.surfaceSunken,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: FanColors.border.withOpacity(0.2),
-                      width: 0.5,
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                const SizedBox(height: 8),
+                if (isLoadingVoters)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (isLoadingVoters) ...[
-                        SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: FanColors.primary,
-                          ),
+                      SizedBox(
+                        width: 11,
+                        height: 11,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 1.5,
+                          color: FanColors.primary,
                         ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Loading votes…',
+                        style: TextStyle(
+                            fontSize: 10, color: FanColors.textTertiary),
+                      ),
+                    ],
+                  )
+                else if (item.voters.isEmpty)
+                  Text(
+                    'No votes yet',
+                    style:
+                        TextStyle(fontSize: 10, color: FanColors.textTertiary),
+                  )
+                else
+                  Row(
+                    children: [
+                      SizedBox(
+                        height: 20,
+                        width: 20 +
+                            (min(item.voters.length, 6) - 1).clamp(0, 5) * 13.0,
+                        child: Stack(
+                          children: [
+                            for (int i = 0; i < min(item.voters.length, 6); i++)
+                              Padding(
+                                padding: EdgeInsets.only(left: i * 13.0),
+                                child: _VoterDot(
+                                  voter: item.voters[i],
+                                  isUser:
+                                      item.voters[i].userId == widget.userId,
+                                  homeTeam: item.homeTeam,
+                                  awayTeam: item.awayTeam,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      if (item.voters.length > 6) ...[
                         const SizedBox(width: 6),
                         Text(
-                          'Loading votes...',
+                          '+${item.voters.length - 6}',
                           style: TextStyle(
-                            fontSize: 10,
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w500,
                             color: FanColors.textTertiary,
                           ),
                         ),
-                      ] else if (item.voters.isEmpty) ...[
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.how_to_vote_outlined,
-                              size: 14,
-                              color: FanColors.textTertiary.withOpacity(0.5),
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              'No votes yet',
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: FanColors.textTertiary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ] else ...[
-                        Wrap(
-                          spacing: 4,
-                          runSpacing: 4,
-                          children: item.voters.take(5).map((voter) {
-                            final isUser = voter.userId == widget.userId;
-                            final selectionDisplay =
-                                voter.selection == 'home_team'
-                                    ? item.homeTeam
-                                    : voter.selection == 'away_team'
-                                        ? item.awayTeam
-                                        : voter.selection == 'draw'
-                                            ? 'Draw'
-                                            : voter.selection ?? '';
-                            final color = voter.selection == 'home_team'
-                                ? FanColors.primary
-                                : voter.selection == 'away_team'
-                                    ? FanColors.away
-                                    : FanColors.draw;
-                            final isWinner = voter.isCorrect == true;
-
-                            return Tooltip(
-                              message:
-                                  '${voter.userName} voted for $selectionDisplay${isWinner ? ' ✅ Won' : ''}',
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 6,
-                                  vertical: 2,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: isWinner
-                                      ? FanColors.primary.withOpacity(0.12)
-                                      : color.withOpacity(0.08),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: isWinner
-                                        ? FanColors.primary.withOpacity(0.3)
-                                        : color.withOpacity(0.15),
-                                    width: isWinner ? 1 : 0.5,
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    if (isUser) ...[
-                                      Icon(
-                                        Icons.person,
-                                        size: 8,
-                                        color: isWinner
-                                            ? FanColors.primary
-                                            : color,
-                                      ),
-                                      const SizedBox(width: 2),
-                                    ],
-                                    Text(
-                                      isUser ? 'You' : voter.userName,
-                                      style: TextStyle(
-                                        fontSize: 8,
-                                        fontWeight: isUser
-                                            ? FontWeight.w600
-                                            : FontWeight.w400,
-                                        color: isWinner
-                                            ? FanColors.primary
-                                            : color,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 2),
-                                    Text(
-                                      selectionDisplay,
-                                      style: TextStyle(
-                                        fontSize: 7,
-                                        color: color.withOpacity(0.7),
-                                      ),
-                                    ),
-                                    if (isWinner) ...[
-                                      const SizedBox(width: 2),
-                                      Icon(
-                                        Icons.check_circle,
-                                        size: 8,
-                                        color: FanColors.primary,
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              ),
-                            );
-                          }).toList(),
-                        ),
-                        if (item.voters.length > 5) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            '+${item.voters.length - 5} more',
-                            style: TextStyle(
-                              fontSize: 8,
-                              color: FanColors.textTertiary,
-                            ),
-                          ),
-                        ],
                       ],
                     ],
                   ),
-                ),
-                const SizedBox(height: 8),
               ],
 
-              // Latest comment display
+              // Latest comment — plain, hairline divider instead of a box
               if (latestComment != null) ...[
+                const SizedBox(height: 10),
                 Container(
-                  padding: const EdgeInsets.all(10),
+                  padding: const EdgeInsets.only(top: 8),
                   decoration: BoxDecoration(
-                    color: FanColors.primary.withOpacity(0.04),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: FanColors.primary.withOpacity(0.1),
-                      width: 0.5,
+                    border: Border(
+                      top: BorderSide(
+                        color: FanColors.border.withOpacity(0.1),
+                        width: 1,
+                      ),
                     ),
                   ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        width: 24,
-                        height: 24,
-                        decoration: BoxDecoration(
-                          color: FanColors.primary.withOpacity(0.1),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Center(
-                          child: Text(
-                            latestComment.username.isNotEmpty
-                                ? latestComment.username[0].toUpperCase()
-                                : '?',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              color: FanColors.primary,
-                            ),
+                  child: RichText(
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    text: TextSpan(
+                      children: [
+                        TextSpan(
+                          text: '${latestComment.username}  ',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: FanColors.textSecondary,
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Text(
-                                  latestComment.username,
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w600,
-                                    color: FanColors.textSecondary,
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  HistoryDateHelper.formatTimeAgo(
-                                      latestComment.timestamp),
-                                  style: TextStyle(
-                                    fontSize: 8,
-                                    color: FanColors.textTertiary,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              latestComment.comment,
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: FanColors.textPrimary,
-                              ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
+                        TextSpan(
+                          text: latestComment.comment,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w400,
+                            color: FanColors.textPrimary,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(height: 8),
               ],
 
-              // ✅ Speech bubble comment input — wrapped in an opaque
-              // GestureDetector so taps here (text field, send button, and
-              // the padding/gaps around them) are absorbed locally and never
-              // bubble up to the card's own onTap: () => _openChat(item).
+              // Comment input — slim underline, absorbed taps
+              const SizedBox(height: 10),
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: () {}, // absorb — do not let this reach the card
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 4, bottom: 4),
-                  child: _SpeechBubbleInput(
-                    controller: commentController,
-                    enabled: isLoggedIn && !isPosting,
-                    hintText: isLoggedIn
-                        ? '💬 Write a comment...'
-                        : '🔒 Log in to comment',
-                    onSend: () {
-                      final text = commentController.text.trim();
-                      if (text.isNotEmpty && !isPosting) {
-                        _createComment(item, text);
-                        commentController.clear();
-                      }
-                    },
-                    onSubmitted: (value) {
-                      if (value.trim().isNotEmpty && !isPosting) {
-                        _createComment(item, value.trim());
-                        commentController.clear();
-                      }
-                    },
-                  ),
+                child: _SpeechBubbleInput(
+                  controller: commentController,
+                  enabled: isLoggedIn && !isPosting,
+                  hintText:
+                      isLoggedIn ? 'Write a comment…' : 'Log in to comment',
+                  onSend: () {
+                    final text = commentController.text.trim();
+                    if (text.isNotEmpty && !isPosting) {
+                      _createComment(item, text);
+                      commentController.clear();
+                    }
+                  },
+                  onSubmitted: (value) {
+                    if (value.trim().isNotEmpty && !isPosting) {
+                      _createComment(item, value.trim());
+                      commentController.clear();
+                    }
+                  },
                 ),
               ),
               if (isPosting) ...[
-                const SizedBox(height: 4),
+                const SizedBox(height: 6),
                 Center(
                   child: SizedBox(
-                    width: 16,
-                    height: 16,
+                    width: 12,
+                    height: 12,
                     child: CircularProgressIndicator(
-                      strokeWidth: 2,
+                      strokeWidth: 1.5,
                       color: FanColors.primary,
                     ),
                   ),
                 ),
               ],
 
-              const SizedBox(height: 4),
+              const SizedBox(height: 10),
 
-              // Footer
+              // Footer — plain text actions, no pill backgrounds
               Row(
                 children: [
-                  if (commentCount > 0)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: FanColors.surfaceSunken,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.chat_bubble_outline,
-                            size: 11,
-                            color: FanColors.textSecondary,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            '$commentCount',
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: FanColors.textSecondary,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
+                  if (commentCount > 0) ...[
+                    Icon(Icons.chat_bubble_outline,
+                        size: 11, color: FanColors.textTertiary),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$commentCount',
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        color: FanColors.textTertiary,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-
+                  ],
                   const Spacer(),
-
-                  // View button
                   GestureDetector(
                     onTap: () => _openAftermatchReview(item),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: FanColors.primary.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.emoji_events_outlined,
-                            size: 13,
-                            color: FanColors.primary,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            'Results',
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: FanColors.primary,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
+                    child: Text(
+                      'Results',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: FanColors.primary,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
-
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 16),
                   GestureDetector(
                     onTap: () => _openChat(item),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: FanColors.primary.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.chat_bubble_outline,
-                            size: 13,
-                            color: FanColors.primary,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            'Chat',
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: FanColors.primary,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
+                    child: Text(
+                      'Chat',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: FanColors.primary,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
@@ -2558,6 +2274,7 @@ Future<void> _openChat(HistoryItem item) async {
       ),
     );
   }
+
   // Add to _HistoryPageState, mirrors FixturesPage's _resolveChannelIdFor
   String? _resolveChannelIdFor(HistoryItem item) {
     String? channelId = item.channelId;
@@ -2599,7 +2316,7 @@ Future<void> _openChat(HistoryItem item) async {
   }
 
   // ============================================================
-  // LIVE CARD
+  // LIVE CARD — slim, backgroundless-text design
   // ============================================================
 
   Widget _buildLiveCard(fixture_models.Fixture fixture) {
@@ -2619,138 +2336,69 @@ Future<void> _openChat(HistoryItem item) async {
       child: Container(
         decoration: BoxDecoration(
           color: FanColors.surface,
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: FanColors.live.withOpacity(0.15),
+            color: FanColors.live.withOpacity(0.25),
             width: 1,
           ),
-          boxShadow: [
-            BoxShadow(
-              color: FanColors.live.withOpacity(0.04),
-              blurRadius: 16,
-              offset: const Offset(0, 4),
-              spreadRadius: 0,
-            ),
-          ],
         ),
         clipBehavior: Clip.antiAlias,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
-                  Container(
-                    width: 22,
-                    height: 22,
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 800),
+                    width: 6,
+                    height: 6,
                     decoration: BoxDecoration(
+                      color: FanColors.live,
                       shape: BoxShape.circle,
-                      color: FanColors.surfaceSunken,
-                      border: Border.all(
-                        color: FanColors.border.withOpacity(0.3),
-                        width: 1,
-                      ),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(11),
-                      child: Image.network(
-                        _getLeagueIcon(fixture.league),
-                        width: 18,
-                        height: 18,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) => Center(
-                          child: Text(
-                            fixture.league.isNotEmpty
-                                ? fixture.league[0].toUpperCase()
-                                : '⚽',
-                            style: TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w700,
-                              color: FanColors.primary,
-                            ),
-                          ),
-                        ),
-                      ),
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
+                  const SizedBox(width: 6),
+                  Text(
+                    isHalfTime ? 'HALF-TIME' : 'LIVE',
+                    style: TextStyle(
+                      color: isHalfTime ? FanColors.draw : FanColors.live,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.4,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    isHalfTime
+                        ? "45'"
+                        : minutes > 0
+                            ? "${minutes.floor()}'"
+                            : "0'",
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: FanColors.textTertiary,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const Spacer(),
+                  Flexible(
                     child: Text(
                       fixture.league,
                       style: TextStyle(
                         fontSize: 10,
-                        color: FanColors.textSecondary,
-                        fontWeight: FontWeight.w600,
+                        color: FanColors.textTertiary,
+                        fontWeight: FontWeight.w500,
                       ),
+                      textAlign: TextAlign.right,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: FanColors.live.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        AnimatedContainer(
-                          duration: const Duration(milliseconds: 800),
-                          width: 6,
-                          height: 6,
-                          decoration: BoxDecoration(
-                            color: FanColors.live,
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: FanColors.live.withOpacity(0.6),
-                                blurRadius: 4,
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          isHalfTime ? 'HT' : 'LIVE',
-                          style: TextStyle(
-                            color: isHalfTime ? FanColors.draw : FanColors.live,
-                            fontSize: 9,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: FanColors.surfaceSunken,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      isHalfTime
-                          ? "45'"
-                          : minutes > 0
-                              ? "${minutes.floor()}'"
-                              : "0'",
-                      style: TextStyle(
-                        fontSize: 9,
-                        color: isHalfTime
-                            ? FanColors.draw
-                            : FanColors.textSecondary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
                 ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               Row(
                 children: [
                   Expanded(
@@ -2767,7 +2415,7 @@ Future<void> _openChat(HistoryItem item) async {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                        const SizedBox(height: 2),
+                        const SizedBox(height: 4),
                         Text(
                           fixture.awayTeam,
                           style: TextStyle(
@@ -2781,185 +2429,104 @@ Future<void> _openChat(HistoryItem item) async {
                       ],
                     ),
                   ),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: FanColors.surfaceSunken,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: FanColors.live.withOpacity(0.15),
-                        width: 1,
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Text(
-                          '$homeScore',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                            color: FanColors.scoreHome,
-                          ),
-                        ),
-                        Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 6),
-                          child: Text(
-                            '-',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: FanColors.textSecondary,
-                            ),
-                          ),
-                        ),
-                        Text(
-                          '$awayScore',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                            color: FanColors.scoreAway,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              if (hasLiveComment) ...[
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: FanColors.surfaceSunken,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Row(
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Container(
-                        width: 20,
-                        height: 20,
-                        decoration: BoxDecoration(
-                          color: FanColors.primary.withOpacity(0.1),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Center(
-                          child: Text(
-                            latestSender != null && latestSender.isNotEmpty
-                                ? latestSender[0].toUpperCase()
-                                : '?',
-                            style: TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w700,
-                              color: FanColors.primary,
-                            ),
-                          ),
+                      Text(
+                        '$homeScore',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: FanColors.scoreHome,
+                          height: 1.3,
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          latestComment!,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: FanColors.textSecondary,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                      Text(
+                        '$awayScore',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: FanColors.scoreAway,
+                          height: 1.3,
                         ),
                       ),
                     ],
                   ),
-                ),
-              ],
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [
-                          FanColors.primary.withOpacity(0.08),
-                          FanColors.primary.withOpacity(0.03),
-                        ],
-                        begin: Alignment.centerLeft,
-                        end: Alignment.centerRight,
-                      ),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: FanColors.primary.withOpacity(0.15),
-                        width: 0.5,
+                ],
+              ),
+              if (hasLiveComment) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.only(top: 8),
+                  decoration: BoxDecoration(
+                    border: Border(
+                      top: BorderSide(
+                        color: FanColors.border.withOpacity(0.1),
+                        width: 1,
                       ),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
+                  ),
+                  child: RichText(
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    text: TextSpan(
                       children: [
-                        Icon(
-                          Icons.chat_bubble_outline,
-                          size: 14,
-                          color: FanColors.primary,
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Join Live Chat 🎙️',
+                        TextSpan(
+                          text: '${latestSender ?? 'Anonymous'}  ',
                           style: TextStyle(
-                            color: FanColors.primary,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: FanColors.textSecondary,
                           ),
                         ),
-                        if (commentCount > 0) ...[
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: FanColors.live.withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Text(
-                              '$commentCount',
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: FanColors.live,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
+                        TextSpan(
+                          text: latestComment!,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: FanColors.textTertiary,
                           ),
-                        ],
+                        ),
                       ],
                     ),
                   ),
+                ),
+              ],
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Icon(Icons.chat_bubble_outline,
+                      size: 13, color: FanColors.primary),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Join live chat',
+                    style: TextStyle(
+                      color: FanColors.primary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (commentCount > 0) ...[
+                    const SizedBox(width: 6),
+                    Text(
+                      '$commentCount',
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        color: FanColors.textTertiary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                   const Spacer(),
                   GestureDetector(
                     onTap: () => _openAftermatchReview(
                       HistoryItem.fromFixture(fixture),
                     ),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: FanColors.primary.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.visibility_outlined,
-                            size: 13,
-                            color: FanColors.primary,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            'Details',
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: FanColors.primary,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
+                    child: Text(
+                      'Details',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: FanColors.primary,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
@@ -2976,67 +2543,67 @@ Future<void> _openChat(HistoryItem item) async {
   // OPEN LIVE GAME CHAT
   // ============================================================
 
- Future<void> _openLiveGameChat(fixture_models.Fixture fixture) async {
-  if (!widget.isLoggedIn) {
-    ToastHelper.showWarning('Log in to join the chat');
-    return;
-  }
+  Future<void> _openLiveGameChat(fixture_models.Fixture fixture) async {
+    if (!widget.isLoggedIn) {
+      ToastHelper.showWarning('Log in to join the chat');
+      return;
+    }
 
-  if (widget.userChannels.isEmpty) {
-    ToastHelper.showWarning('No channels available');
-    return;
-  }
+    if (widget.userChannels.isEmpty) {
+      ToastHelper.showWarning('No channels available');
+      return;
+    }
 
-  final UserChannel channel = widget.userChannels.first;
-  final userVoteSelection = AppCache.userVotes[fixture.matchId];
+    final UserChannel channel = widget.userChannels.first;
+    final userVoteSelection = AppCache.userVotes[fixture.matchId];
 
-  final chatScreen = ChatScreen(
-    channelId: channel.channelId,
-    fixtureId: fixture.matchId,
-    fixture: fixture,
-    userId: widget.userId,
-    username: widget.username,
-    authToken: widget.authToken,
-    isLoggedIn: widget.isLoggedIn,
-    comradesList: const {},
-    userVoteSelection: userVoteSelection,
-  );
+    final chatScreen = ChatScreen(
+      channelId: channel.channelId,
+      fixtureId: fixture.matchId,
+      fixture: fixture,
+      userId: widget.userId,
+      username: widget.username,
+      authToken: widget.authToken,
+      isLoggedIn: widget.isLoggedIn,
+      comradesList: const {},
+      userVoteSelection: userVoteSelection,
+    );
 
-  final double screenWidth = MediaQuery.of(context).size.width;
-  final bool isWideScreen = screenWidth >= 900;
+    final double screenWidth = MediaQuery.of(context).size.width;
+    final bool isWideScreen = screenWidth >= 900;
 
-  final result = isWideScreen
-      ? await showDialog(
-          context: context,
-          barrierDismissible: true,
-          barrierColor: Colors.black.withOpacity(0.5),
-          builder: (dialogContext) => Dialog(
-            backgroundColor: Colors.transparent,
-            insetPadding: const EdgeInsets.symmetric(
-              horizontal: 80,
-              vertical: 40,
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: Container(
-                width: 480,
-                height: MediaQuery.of(context).size.height * 0.85,
-                constraints: const BoxConstraints(maxHeight: 900),
-                color: FanColors.background,
-                child: chatScreen,
+    final result = isWideScreen
+        ? await showDialog(
+            context: context,
+            barrierDismissible: true,
+            barrierColor: Colors.black.withOpacity(0.5),
+            builder: (dialogContext) => Dialog(
+              backgroundColor: Colors.transparent,
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 80,
+                vertical: 40,
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  width: 480,
+                  height: MediaQuery.of(context).size.height * 0.85,
+                  constraints: const BoxConstraints(maxHeight: 900),
+                  color: FanColors.background,
+                  child: chatScreen,
+                ),
               ),
             ),
-          ),
-        )
-      : await Navigator.push(
-          context,
-          MaterialPageRoute(builder: (context) => chatScreen),
-        );
+          )
+        : await Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => chatScreen),
+          );
 
-  if (result == true) {
-    _loadLiveGamesFromCache();
+    if (result == true) {
+      _loadLiveGamesFromCache();
+    }
   }
-}
   // ============================================================
   // HELPER: Get League Icon
   // ============================================================
@@ -3062,40 +2629,40 @@ Future<void> _openChat(HistoryItem item) async {
     return 'https://cdn-icons-png.flaticon.com/512/3095/3095243.png';
   }
 
- @override
-void dispose() {
-  FanTheme.controller.removeListener(_onThemeChanged);
-  _refreshTimer?.cancel();
-  _appCacheSubscription?.cancel();
-  WidgetsBinding.instance.removeObserver(this);
+  @override
+  void dispose() {
+    FanTheme.controller.removeListener(_onThemeChanged);
+    _refreshTimer?.cancel();
+    _appCacheSubscription?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
 
-  // ✅ Leave only the rooms this page joined — never disconnect the
-  // shared socket, since ChatScreen/FixturesPage may be using it too.
-  final ws = WebSocketService();
-  for (var fixture in _liveGames) {
-    final item = _historyItems.firstWhere(
-      (h) => h.fixtureId == fixture.matchId,
-      orElse: () => HistoryItem.fromFixture(fixture),
-    );
-    final channelId = _resolveChannelIdFor(item);
-    if (channelId != null) {
-      ws.leaveChannelFixtureRoom(channelId, fixtureId: fixture.matchId);
-    }
-  }
-  for (var item in _historyItems) {
-    if (item.status == 'live' || item.status == 'half_time') {
+    // ✅ Leave only the rooms this page joined — never disconnect the
+    // shared socket, since ChatScreen/FixturesPage may be using it too.
+    final ws = WebSocketService();
+    for (var fixture in _liveGames) {
+      final item = _historyItems.firstWhere(
+        (h) => h.fixtureId == fixture.matchId,
+        orElse: () => HistoryItem.fromFixture(fixture),
+      );
       final channelId = _resolveChannelIdFor(item);
       if (channelId != null) {
-        ws.leaveChannelFixtureRoom(channelId, fixtureId: item.fixtureId);
+        ws.leaveChannelFixtureRoom(channelId, fixtureId: fixture.matchId);
       }
     }
-  }
+    for (var item in _historyItems) {
+      if (item.status == 'live' || item.status == 'half_time') {
+        final channelId = _resolveChannelIdFor(item);
+        if (channelId != null) {
+          ws.leaveChannelFixtureRoom(channelId, fixtureId: item.fixtureId);
+        }
+      }
+    }
 
-  for (var controller in _commentControllers.values) {
-    controller.dispose();
-  }
-  _commentControllers.clear();
+    for (var controller in _commentControllers.values) {
+      controller.dispose();
+    }
+    _commentControllers.clear();
 
-  super.dispose();
-}
+    super.dispose();
+  }
 }

@@ -6,6 +6,7 @@ import '../pages/posts_page.dart';
 import '../pages/fixture_page.dart';
 import 'package:flutter/foundation.dart' show kDebugMode, compute;
 import '../modals/login_modal.dart';
+import 'package:flutter/foundation.dart' show kIsWeb, kDebugMode, compute;
 import '../modals/FAB/add_post_modal.dart';
 
 import '../modals/homepage/notifications_modal.dart';
@@ -1555,6 +1556,7 @@ class _HomePageState extends State<HomePage>
   }
 
   void _initObservers() {
+
     WidgetsBinding.instance.addObserver(this);
   }
 
@@ -4992,13 +4994,33 @@ class _HomePageState extends State<HomePage>
           authToken: _authToken);
     } catch (e) {}
   }
+    static List<dynamic> _decodeNotifications(String jsonString) {
+    try {
+      return jsonDecode(jsonString) as List<dynamic>;
+    } catch (_) {
+      return [];
+    }
+  }
 
-  Future<void> _loadStoredNotifications() async {
+  static String _encodeNotifications(List<Map<String, dynamic>> n) {
+    try {
+      return jsonEncode(n);
+    } catch (_) {
+      return '[]';
+    }
+  }
+
+   Future<void> _loadStoredNotifications() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final stored = prefs.getString('notifications');
       if (stored != null) {
-        final loaded = await compute(_decodeNotifications, stored);
+        // ✅ CHANGED — compute() doesn't run in a real isolate on Flutter
+        // web; it just adds a Future/message-passing hop on the same UI
+        // thread, so it was pure overhead there. Skip it on web.
+        final loaded = kIsWeb
+            ? _decodeNotifications(stored)
+            : await compute(_decodeNotifications, stored);
         if (mounted) {
           setState(() {
             _notifications = List<Map<String, dynamic>>.from(loaded);
@@ -5016,30 +5038,19 @@ class _HomePageState extends State<HomePage>
     } catch (e) {}
   }
 
-  static List<dynamic> _decodeNotifications(String jsonString) {
-    try {
-      return jsonDecode(jsonString) as List<dynamic>;
-    } catch (_) {
-      return [];
-    }
-  }
-
   Future<void> _saveNotifications() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final jsonString = await compute(_encodeNotifications, _notifications);
+      // ✅ CHANGED — same reasoning as above.
+      final jsonString = kIsWeb
+          ? _encodeNotifications(_notifications)
+          : await compute(_encodeNotifications, _notifications);
       await prefs.setString('notifications', jsonString);
       await prefs.setInt('notificationCount', _notificationCount);
     } catch (e) {}
   }
 
-  static String _encodeNotifications(List<Map<String, dynamic>> n) {
-    try {
-      return jsonEncode(n);
-    } catch (_) {
-      return '[]';
-    }
-  }
+  
 
   void _initAnimations() {
     _pulseAnimationController = AnimationController(
