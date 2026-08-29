@@ -1905,7 +1905,7 @@ class AppCache {
   // ==========================================================================
   // REFRESH FIXTURES WITH TIME - DIFFED (only notifies on real change)
   // ==========================================================================
-  static Future<void> refreshFixturesWithTime() async {
+    static Future<void> refreshFixturesWithTime() async {
     try {
       final response = await http.get(
         Uri.parse(
@@ -1923,8 +1923,15 @@ class AppCache {
         final data = json.decode(response.body);
         final List<dynamic> fixturesData =
             data['data'] ?? data['fixtures'] ?? [];
-        final newFixtures =
-            fixturesData.map((f) => Fixture.fromJson(f)).toList();
+
+        // ✅ FIX: filter out completed/finished games — without this,
+        // the 5-minute background timer was silently re-injecting
+        // history games back into AppCache.fixtures (and disk), which
+        // is what made "completed" fixtures reappear on FixturesPage.
+        final newFixtures = fixturesData
+            .map((f) => Fixture.fromJson(f))
+            .where((f) => f.status != 'completed' && f.status != 'finished')
+            .toList();
 
         // ✅ Compare against what's currently held before touching anything.
         // A JSON-based compare avoids requiring Fixture to implement ==/hashCode
@@ -1964,7 +1971,6 @@ class AppCache {
           name: 'AppCache');
     }
   }
-
   // Structural compare via toJson() — cheap, no need to touch the Fixture
   // model. Order-sensitive on purpose: if the API reorders fixtures, that's
   // a real change worth repainting for.
@@ -2225,7 +2231,7 @@ class AppCache {
   // ==========================================================================
   static const int _instantFixturesCount = 10;
 
-  static Future<void> loadFixturesInstantly() async {
+    static Future<void> loadFixturesInstantly() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final fixturesJson = prefs.getString('fixtures_cache');
@@ -2242,9 +2248,13 @@ class AppCache {
             ? data.length
             : _instantFixturesCount;
 
+        // ✅ FIX: filter completed/finished here too, so a disk cache that
+        // was written before this fix (or written by any other code path
+        // that skips the filter) doesn't resurrect old games on cold start.
         fixtures = data
             .take(instantCount)
             .map((f) => Fixture.fromJson(f as Map<String, dynamic>))
+            .where((f) => f.status != 'completed' && f.status != 'finished')
             .toList();
 
         if (kDebugMode) {
@@ -2264,6 +2274,8 @@ class AppCache {
               final remaining = data
                   .skip(instantCount)
                   .map((f) => Fixture.fromJson(f as Map<String, dynamic>))
+                  .where(
+                      (f) => f.status != 'completed' && f.status != 'finished')
                   .toList();
 
               fixtures = [...fixtures, ...remaining];

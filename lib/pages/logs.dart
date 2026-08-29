@@ -968,7 +968,7 @@ class _HistoryPageState extends State<HistoryPage>
   // FETCH VOTERS FOR A FIXTURE
   // ============================================================
 
-  Future<List<fixture_models.Voter>> _fetchVotersForFixture(String fixtureId,
+    Future<List<fixture_models.Voter>> _fetchVotersForFixture(String fixtureId,
       String? winner, String homeTeam, String awayTeam) async {
     final normalizedWinner = winner ?? '';
 
@@ -994,8 +994,14 @@ class _HistoryPageState extends State<HistoryPage>
     });
 
     try {
+      // ✅ FIX: cache-bust — this app-level cache (_votersCache) is fine,
+      // but the underlying HTTP GET used the same URL every call, so on
+      // web the browser could satisfy repeat requests from its own cache
+      // instead of hitting the backend, meaning a voter who was removed
+      // (or a winner correction) server-side wouldn't show up here either.
       final url =
-          Uri.parse('$API_BASE_URL/actions/vote/fixture/$fixtureId/voters');
+          Uri.parse('$API_BASE_URL/actions/vote/fixture/$fixtureId/voters'
+              '?_=${DateTime.now().millisecondsSinceEpoch}');
 
       debugPrint('🔍 Fetching voters from: $url');
 
@@ -1004,6 +1010,8 @@ class _HistoryPageState extends State<HistoryPage>
         headers: {
           'Authorization': 'Bearer ${widget.authToken}',
           'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
         },
       ).timeout(REQUEST_TIMEOUT);
 
@@ -1145,7 +1153,7 @@ class _HistoryPageState extends State<HistoryPage>
   // LOAD COMMENTS FOR HISTORY ITEMS
   // ============================================================
 
-  Future<void> _loadCommentsForHistoryItems(List<HistoryItem> items) async {
+   Future<void> _loadCommentsForHistoryItems(List<HistoryItem> items) async {
     if (items.isEmpty) return;
 
     debugPrint('💬 Loading comments for ${items.length} history items...');
@@ -1157,15 +1165,23 @@ class _HistoryPageState extends State<HistoryPage>
       if (channelId == null) continue;
 
       try {
-        final response = await http
-            .get(
-              Uri.parse(
-                  '$API_BASE_URL/channels/$channelId/messages?fixture_id=${item.fixtureId}&limit=100'),
-              headers: widget.authToken != null && widget.authToken!.isNotEmpty
-                  ? {'Authorization': 'Bearer ${widget.authToken}'}
-                  : {},
-            )
-            .timeout(REQUEST_TIMEOUT);
+        final response = await http.get(
+          // ✅ FIX: cache-bust with a timestamp query param + explicit
+          // no-cache headers. Same root cause as the posts.dart bug —
+          // on Flutter Web this URL was identical on every call, so the
+          // browser's HTTP cache could keep serving a stale message
+          // list (including messages/comments that were later deleted
+          // server-side) instead of ever hitting the network again.
+          Uri.parse(
+              '$API_BASE_URL/channels/$channelId/messages?fixture_id=${item.fixtureId}&limit=100'
+              '&_=${DateTime.now().millisecondsSinceEpoch}'),
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            if (widget.authToken != null && widget.authToken!.isNotEmpty)
+              'Authorization': 'Bearer ${widget.authToken}',
+          },
+        ).timeout(REQUEST_TIMEOUT);
 
         if (response.statusCode == 200) {
           final data = json.decode(response.body);
@@ -1428,13 +1444,20 @@ class _HistoryPageState extends State<HistoryPage>
   // CHECK VOTES BUTTON VISIBILITY
   // ============================================================
 
-  Future<bool> _checkVotesButtonVisibility() async {
+   Future<bool> _checkVotesButtonVisibility() async {
     try {
       final response = await http.get(
-        Uri.parse('$API_BASE_URL/visibility/votes_button_show'),
-        headers: widget.authToken != null && widget.authToken!.isNotEmpty
-            ? {'Authorization': 'Bearer ${widget.authToken}'}
-            : {},
+        // ✅ FIX: same cache-busting treatment for consistency — this
+        // toggle is low-frequency-changing but there's no reason to let
+        // the browser serve a possibly month-old cached value either.
+        Uri.parse('$API_BASE_URL/visibility/votes_button_show'
+            '?_=${DateTime.now().millisecondsSinceEpoch}'),
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          if (widget.authToken != null && widget.authToken!.isNotEmpty)
+            'Authorization': 'Bearer ${widget.authToken}',
+        },
       );
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -1446,7 +1469,6 @@ class _HistoryPageState extends State<HistoryPage>
       return true;
     }
   }
-
   // ============================================================
   // OPEN AFTERMATCH REVIEW MODAL
   // ============================================================

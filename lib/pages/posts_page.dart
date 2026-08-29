@@ -731,7 +731,7 @@ class _PostsPageState extends State<PostsPage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _fetchPostsFromNetwork() async {
+    Future<void> _fetchPostsFromNetwork() async {
     if (_isFetching || _isLoggingOut) return;
 
     _isFetching = true;
@@ -744,8 +744,18 @@ class _PostsPageState extends State<PostsPage> with WidgetsBindingObserver {
       debugPrint('🌐 Fetching posts from network...');
 
       final headers = await _buildHeaders(forceRefresh: true);
+      // ✅ FIX: cache-bust the URL. On Flutter Web, http calls go through
+      // the browser's fetch()/XHR layer and are subject to normal HTTP
+      // caching. Without a varying query param (and with the backend not
+      // sending Cache-Control/ETag on this endpoint), the browser was free
+      // to keep serving a stale response for an unbounded amount of time —
+      // this is the other half of why deleted posts kept showing up.
       final response = await http
-          .get(Uri.parse('$apiBaseUrl/posts'), headers: headers)
+          .get(
+            Uri.parse(
+                '$apiBaseUrl/posts?_=${DateTime.now().millisecondsSinceEpoch}'),
+            headers: headers,
+          )
           .timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200) {
@@ -785,7 +795,7 @@ class _PostsPageState extends State<PostsPage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _checkForServerUpdates() async {
+    Future<void> _checkForServerUpdates() async {
     if (_isFetching || _isSyncing || _isLoggingOut) return;
 
     if (_lastSyncTime != null &&
@@ -793,37 +803,35 @@ class _PostsPageState extends State<PostsPage> with WidgetsBindingObserver {
       return;
     }
 
-    try {
-      final headers = await _buildHeaders(forceRefresh: false);
-      final response = await http
-          .head(Uri.parse('$apiBaseUrl/posts'), headers: headers)
-          .timeout(const Duration(seconds: 10));
-
-      if (response.statusCode == 304) {
-        _lastSyncTime = DateTime.now();
-        return;
-      }
-
-      if (response.statusCode == 200) {
-        final newEtag = response.headers['etag'];
-        if (newEtag != null && newEtag != _cache.lastEtag) {
-          await _syncPostsInBackground();
-        }
-      }
-    } catch (e) {
-      debugPrint('⚠️ Update check failed: $e');
-    }
+    // ✅ FIX: previously this did an HTTP HEAD and only called
+    // _syncPostsInBackground() if the response ETag differed from
+    // _cache.lastEtag. The backend never sends an ETag header on
+    // /api/posts, so newEtag was always null, the comparison never
+    // matched, and this method silently did nothing — meaning deleted
+    // posts (and new posts) never got picked up outside of a manual
+    // pull-to-refresh. Just run the real sync directly; it already does
+    // its own _havePostsChanged() diff before touching state/cache, so
+    // this isn't materially more expensive than the old HEAD request.
+    await _syncPostsInBackground();
   }
 
-  Future<void> _syncPostsInBackground() async {
+   Future<void> _syncPostsInBackground() async {
     if (_isSyncing || _isFetching || _isLoggingOut) return;
 
     _isSyncing = true;
 
     try {
       final headers = await _buildHeaders(forceRefresh: true);
+      // ✅ FIX: same cache-busting as _fetchPostsFromNetwork — this is the
+      // path that now actually runs periodically (see _checkForServerUpdates
+      // fix above), so it needs the same protection against the browser's
+      // HTTP cache silently returning a stale post list.
       final response = await http
-          .get(Uri.parse('$apiBaseUrl/posts'), headers: headers)
+          .get(
+            Uri.parse(
+                '$apiBaseUrl/posts?_=${DateTime.now().millisecondsSinceEpoch}'),
+            headers: headers,
+          )
           .timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200) {
