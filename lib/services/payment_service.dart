@@ -462,6 +462,7 @@ class PaymentService {
   // ==========================================================================
 
   /// Initiate STK Push payment (for deposits and channel loading)
+    /// Initiate STK Push payment (for deposits and channel loading)
   static Future<STKPushResult> initiateSTKPush({
     required String userId,
     required String username,
@@ -492,6 +493,8 @@ class PaymentService {
         return STKPushResult.error('Valid phone number is required');
       }
 
+      final normalizedPhone = _normalizePhone(phone);
+
       final headers = _buildHeaders(authToken);
 
       final response = await http
@@ -499,7 +502,7 @@ class PaymentService {
             Uri.parse('$API_BASE_URL/lipaclash/stk-push'),
             headers: headers,
             body: json.encode({
-              'phone_number': phone,
+              'phone_number': normalizedPhone,
               'amount': amount.toString(),
               'account_reference': username,
               'transaction_desc': purpose ?? 'Top up balance',
@@ -545,6 +548,7 @@ class PaymentService {
   // ==========================================================================
 
   /// Initiate B2C payment (admin withdrawal/payout)
+   /// Initiate B2C payment (admin withdrawal/payout)
   static Future<B2CResult> initiateB2CPayment({
     required String userId,
     required String username,
@@ -568,6 +572,8 @@ class PaymentService {
         return B2CResult.error('Valid phone number is required');
       }
 
+      final normalizedPhone = _normalizePhone(phoneNumber);
+
       // Check balance first
       final balance = await _getUserBalance(userId, authToken);
       if (balance < amount) {
@@ -583,7 +589,7 @@ class PaymentService {
             Uri.parse('$API_BASE_URL/lipaclash/b2c/send'),
             headers: headers,
             body: json.encode({
-              'phone_number': phoneNumber,
+              'phone_number': normalizedPhone,
               'amount': amount.toString(),
               'remarks': remarks ?? 'Channel withdrawal',
               'occasion': occasion ?? 'Channel Payout',
@@ -913,10 +919,16 @@ class PaymentService {
     final random = DateTime.now().microsecondsSinceEpoch % 10000;
     return '$prefix${timestamp.toString().substring(5)}${random.toString().padLeft(4, '0')}';
   }
-
-  static bool _isValidPhoneNumber(String phone) {
+    static bool _isValidPhoneNumber(String phone) {
     final cleaned = phone.replaceAll(RegExp(r'[^0-9]'), '');
-    final regex = RegExp(r'^(0|254)?[7-9][0-9]{8}$');
+    // Kenyan mobile numbers, optionally prefixed with '0' or country code '254'.
+    // 07xx / 01xx-legacy Safaricom/Airtel ranges (700-799),
+    // plus the newer 01xx block:
+    //   0100-0106 -> Airtel
+    //   0110-0115 -> Safaricom
+    final regex = RegExp(
+      r'^(0|254)?(7[0-9]{8}|1(?:0[0-6]|1[0-5])[0-9]{6})$',
+    );
     return regex.hasMatch(cleaned);
   }
 
@@ -925,13 +937,13 @@ class PaymentService {
     if (cleaned.startsWith('0')) {
       return '254${cleaned.substring(1)}';
     }
-    if (cleaned.length == 10 && cleaned.startsWith('7')) {
+    if (cleaned.length == 9 &&
+        (cleaned.startsWith('7') || cleaned.startsWith('1'))) {
       return '254$cleaned';
     }
     return cleaned;
   }
 }
-
 // ============================================================================
 // LOCAL STORAGE FOR TRANSACTIONS
 // ============================================================================
