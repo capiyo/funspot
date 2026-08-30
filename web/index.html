@@ -1,4 +1,7 @@
-<!DOCTYPE html><html><head>
+<!DOCTYPE html>
+<html>
+
+<head>
   <!--
     If you are serving your web app in a path other than the root, change the
     href value below to reflect the base path you are serving from.
@@ -30,25 +33,9 @@
   <title>funspot</title>
   <link rel="manifest" href="manifest.json">
 
-
   <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport">
 
-
-
-
-
-
-
-
-
-
-  
-  
-  
-  
-  
-  
-  <style id="splash-screen-style">
+  <style id="app-loading-style">
     html {
       height: 100%
     }
@@ -57,86 +44,62 @@
       margin: 0;
       min-height: 100%;
       background-color: #FFFFFF;
-          background-size: 100% 100%;
-    }
-
-    .center {
-      margin: 0;
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      -ms-transform: translate(-50%, -50%);
-      transform: translate(-50%, -50%);
-    }
-
-    .contain {
-      display:block;
-      width:100%; height:100%;
-      object-fit: contain;
-    }
-
-    .stretch {
-      display:block;
-      width:100%; height:100%;
-    }
-
-    .cover {
-      display:block;
-      width:100%; height:100%;
-      object-fit: cover;
-    }
-
-    .bottom {
-      position: absolute;
-      bottom: 0;
-      left: 50%;
-      -ms-transform: translate(-50%, 0);
-      transform: translate(-50%, 0);
-    }
-
-    .bottomLeft {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-    }
-
-    .bottomRight {
-      position: absolute;
-      bottom: 0;
-      right: 0;
     }
 
     @media (prefers-color-scheme: dark) {
       body {
         background-color: #121A30;
-          }
+      }
+    }
+
+    /* Hides the SEO fallback content once Flutter has taken over the page.
+       Flutter calls hideSeoContent() from Dart after its first frame. */
+    #seo-content.app-ready {
+      display: none;
     }
   </style>
-  <script id="splash-screen-script">
-    function removeSplashFromWeb() {
-      document.getElementById("splash")?.remove();
-      document.getElementById("splash-branding")?.remove();
-      document.body.style.background = "transparent";
+  <script id="app-loading-script">
+    function hideSeoContent() {
+      var el = document.getElementById("seo-content");
+      if (el) { el.classList.add("app-ready"); }
     }
   </script>
 </head>
 
 <body>
-  <picture id="splash">
-      <source srcset="splash/img/light-1x.png 1x, splash/img/light-2x.png 2x, splash/img/light-3x.png 3x, splash/img/light-4x.png 4x" media="(prefers-color-scheme: light)">
-      <source srcset="splash/img/dark-1x.png 1x, splash/img/dark-2x.png 2x, splash/img/dark-3x.png 3x, splash/img/dark-4x.png 4x" media="(prefers-color-scheme: dark)">
-      <img class="center" aria-hidden="true" src="splash/img/light-1x.png" alt="">
-  </picture>
-  
-  
-  
+  <!-- Static content for crawlers (Google/AdSense) and for users before
+       the Flutter engine finishes loading. Flutter hides this via
+       hideSeoContent() once it mounts. Keep this real, readable text —
+       not just a loading spinner — since this is the only thing a
+       crawler bot will ever see on this URL. -->
+  <div id="seo-content" style="max-width:640px;margin:0 auto;padding:32px 20px;font-family:sans-serif;color:#0D0B1E;">
+    <h1>Funspot — Live Football Fan Arena</h1>
+    <p>
+      Funspot is a live football fan engagement app. Join channel-based
+      voting on real fixtures, chat live with other fans during matches,
+      and climb the leaderboard every season.
+    </p>
+    <h2>What you can do on Funspot</h2>
+    <ul>
+      <li><strong>Arena</strong> — vote on upcoming and live fixtures, join
+        channels with other fans, and chat during matches.</li>
+      <li><strong>Feed</strong> — share photos and video with the community
+        and follow other fans' posts.</li>
+      <li><strong>History</strong> — browse settled fixtures, past results,
+        and channel leaderboards from previous seasons.</li>
+    </ul>
+    <p>
+      Funspot channels are built around real football fixtures across
+      major leagues, with live commentary and sub-fixture markets
+      (first to score, first corner, first yellow card, and more) that
+      fans can vote and chat about together.
+    </p>
+  </div>
 
   <!-- Firebase Phone Auth reCAPTCHA container (web only) -->
   <div id="recaptcha-container"></div>
 
   <script src="flutter_bootstrap.js" async=""></script>
+</body>
 
-
-
-
-</body></html>
+</html>

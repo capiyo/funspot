@@ -217,8 +217,8 @@ class ApiService {
     }
 
     final sizeInMB = videoBytes.lengthInBytes / (1024 * 1024);
-    if (sizeInMB > 50) {
-      throw Exception('Video too large. Max size: 50MB');
+    if (sizeInMB > 100) {
+      throw Exception('Video too large. Max size: 100MB');
     }
 
     String extension = _extensionFromName(videoName, fallback: 'mp4');
@@ -300,8 +300,8 @@ class ApiService {
     void Function(int sent, int total)? onSendProgress,
   }) async {
     final sizeInMB = videoBytes.lengthInBytes / (1024 * 1024);
-    if (sizeInMB > 50) {
-      throw Exception('Video too large. Max size: 50MB');
+    if (sizeInMB > 100) {
+      throw Exception('Video too large. Max size: 100MB');
     }
 
     String extension = _extensionFromName(videoName, fallback: 'mp4');
@@ -449,9 +449,9 @@ class ApiService {
       debugPrint('📤 Uploading chat video with thumbnail...');
 
       final sizeInMB = videoBytes.lengthInBytes / (1024 * 1024);
-      if (sizeInMB > 50) {
+      if (sizeInMB > 100) {
         debugPrint('⚠️ Video too large: ${sizeInMB.toStringAsFixed(2)}MB');
-        throw Exception('Video must be less than 50MB');
+        throw Exception('Video must be less than 100MB');
       }
 
       String extension = _extensionFromName(videoName, fallback: 'mp4');
@@ -533,8 +533,8 @@ class ApiService {
     }
 
     final sizeInMB = videoBytes.lengthInBytes / (1024 * 1024);
-    if (sizeInMB > 50) {
-      throw Exception('Video must be less than 50MB');
+    if (sizeInMB > 100) {
+      throw Exception('Video must be less than 100MB');
     }
 
     final ts = DateTime.now().millisecondsSinceEpoch;
@@ -593,8 +593,8 @@ class ApiService {
   }) async {
     try {
       final sizeInMB = videoBytes.lengthInBytes / (1024 * 1024);
-      if (sizeInMB > 50) {
-        throw Exception('Video must be less than 50MB');
+      if (sizeInMB > 100) {
+        throw Exception('Video must be less than 100MB');
       }
 
       final ts = DateTime.now().millisecondsSinceEpoch;
