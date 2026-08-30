@@ -181,9 +181,9 @@ function buildContactPage() {
   <h2>Based in</h2>
   <p>Nairobi, Kenya</p>
 </section>
-<p>For account or payment issues (M-Pesa transactions, channel disputes,
-reporting abusive content), please include your Funspot username or phone
-number used to sign up so we can look into it faster.</p>
+<p>For account issues (channel disputes, reporting abusive content, or
+photo/video content concerns), please include your Funspot username or
+phone number used to sign up so we can look into it faster.</p>
 `;
     writeFile('contact/index.html', pageShell({
         title: 'Contact — Funspot',
@@ -210,10 +210,8 @@ information is used.</p>
       details you add (nickname, club, country).</li>
     <li><strong>Activity data</strong> — fixture votes, channel memberships,
       chat messages, comments, likes, and posts you make within the app.</li>
-    <li><strong>Payment data</strong> — where you use M-Pesa within the app
-      (for example, pledges or bets tied to a channel), transaction details
-      are processed to complete that transaction. We do not store your
-      M-Pesa PIN or full payment credentials.</li>
+    <li><strong>Photos and videos</strong> — any photos or videos you choose
+      to upload or share within the Feed or in channel chats.</li>
     <li><strong>Push notification tokens</strong> — a device token used to
       deliver notifications about votes, comments, and channel activity.</li>
     <li><strong>Basic device/usage data</strong> — standard technical data
@@ -226,23 +224,20 @@ information is used.</p>
   <h2>How we use this information</h2>
   <ul>
     <li>To operate core app features: voting, channels, chat, leaderboards,
-      and notifications.</li>
-    <li>To process in-app M-Pesa transactions you initiate.</li>
+      photo/video sharing, and notifications.</li>
     <li>To maintain and improve the reliability and security of the app.</li>
   </ul>
 </section>
 
 <section>
   <h2>Third parties we use</h2>
-  <p>Funspot relies on the following third-party services to operate:</p>
+  <p>Funspot relies on the following third-party service to operate:</p>
   <ul>
     <li><strong>Firebase</strong> (Google) — authentication and push
       notifications.</li>
-    <li><strong>M-Pesa / Safaricom</strong> — payment processing for
-      in-app transactions you choose to make.</li>
   </ul>
-  <p>Each of these providers has its own privacy policy governing how they
-  handle data on our behalf.</p>
+  <p>This provider has its own privacy policy governing how it handles
+  data on our behalf.</p>
 </section>
 
 <section>
