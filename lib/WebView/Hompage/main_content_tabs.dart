@@ -1,8 +1,10 @@
 // lib/WebView/Hompage/main_content_tabs.dart
 import 'package:flutter/material.dart';
 import '../../pages/fan_Funzy_design.dart';
+import '../../utils/add_helper.dart';
+import 'dart:async';
 
-class MainContentTabs extends StatelessWidget {
+class MainContentTabs extends StatefulWidget {
   final Widget arenaContent;
   final Widget feedContent;
   final Widget logsContent;
@@ -15,18 +17,100 @@ class MainContentTabs extends StatelessWidget {
   });
 
   @override
+  State<MainContentTabs> createState() => _MainContentTabsState();
+}
+
+class _MainContentTabsState extends State<MainContentTabs> {
+  // Carousel state
+  List<Map<String, dynamic>> _carouselItems = [];
+  int _currentIndex = 0;
+  Timer? _carouselTimer;
+  bool _isRunning = false;
+
+  final List<Map<String, dynamic>> _sampleComrades = const [
+    {'name': '⚽ GoalMachine', 'team': 'Real Madrid'},
+    {'name': '🔥 FireStriker', 'team': 'Barcelona'},
+    {'name': '🛡️ DefenseWall', 'team': 'Bayern'},
+    {'name': '🎯 Sniper', 'team': 'PSG'},
+    {'name': '💪 PowerShot', 'team': 'Liverpool'},
+    {'name': '✨ MagicFeet', 'team': 'Man City'},
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _buildCarouselItems();
+    _startAutoScroll();
+  }
+
+  @override
+  void dispose() {
+    _carouselTimer?.cancel();
+    super.dispose();
+  }
+
+  void _buildCarouselItems() {
+    final items = <Map<String, dynamic>>[];
+
+    // Add sample comrades
+    for (var comrade in _sampleComrades) {
+      items.add({
+        'type': 'comrade',
+        'name': comrade['name'],
+        'team': comrade['team'],
+      });
+    }
+
+    // Add ads (every 3rd item)
+    final adIds = AdHelper.carouselAdUnitIds;
+    final List<Map<String, dynamic>> finalItems = [];
+    int adIndex = 0;
+
+    for (int i = 0; i < items.length; i++) {
+      finalItems.add(items[i]);
+      if ((i + 1) % 3 == 0 && adIndex < adIds.length) {
+        finalItems.add({
+          'type': 'ad',
+          'adUnitId': adIds[adIndex % adIds.length],
+        });
+        adIndex++;
+      }
+    }
+
+    setState(() {
+      _carouselItems = finalItems;
+    });
+  }
+
+  void _startAutoScroll() {
+    if (_isRunning) return;
+    _isRunning = true;
+
+    _carouselTimer = Timer.periodic(const Duration(seconds: 4), (timer) {
+      if (!mounted || _carouselItems.isEmpty) {
+        timer.cancel();
+        _isRunning = false;
+        return;
+      }
+      setState(() {
+        _currentIndex = (_currentIndex + 1) % _carouselItems.length;
+      });
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Row(
       children: [
         // Arena Tab
         Expanded(
-          child: _buildTabContent('Arena', arenaContent),
+          child: _buildTabContent('Arena', widget.arenaContent),
         ),
         // Feed Tab
         Expanded(
-          child: _buildTabContent('Feed', feedContent),
+          child: _buildTabContent('Feed', widget.feedContent),
         ),
-        // Logs Tab - Contains History + Right Panel Carousel
+        // Logs Tab - With horizontal carousel at bottom
         Expanded(
           child: _buildLogsTab(),
         ),
@@ -69,7 +153,7 @@ class MainContentTabs extends StatelessWidget {
     );
   }
 
-  // ✅ Logs Tab with Right Panel Carousel
+  // ✅ Logs Tab with Snackbar-style Carousel at bottom
   Widget _buildLogsTab() {
     return Container(
       decoration: BoxDecoration(
@@ -97,69 +181,170 @@ class MainContentTabs extends StatelessWidget {
             ),
           ),
           Divider(height: 0.5, color: FanColors.border.withValues(alpha: 0.06)),
+          // History content (fills remaining space)
           Expanded(
-            child: Row(
-              children: [
-                // History content (takes most space)
-                Expanded(
-                  flex: 3,
-                  child: logsContent,
-                ),
-                // ✅ Right panel carousel (only on logs tab)
-                _buildRightPanelCarousel(),
-              ],
-            ),
+            child: widget.logsContent,
           ),
+          // ✅ Snackbar-style carousel at bottom
+          _buildSnackbarCarousel(),
         ],
       ),
     );
   }
 
-  Widget _buildRightPanelCarousel() {
-    // This will be replaced by the actual carousel from HomePageWeb
-    // For now, show a placeholder
+  // ==========================================================================
+  // SNACKBAR-STYLE CAROUSEL - Horizontal, compact, at bottom
+  // ==========================================================================
+
+  Widget _buildSnackbarCarousel() {
+    if (_carouselItems.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final currentItem = _carouselItems[_currentIndex];
+    final isAd = currentItem['type'] == 'ad';
+
     return Container(
-      width: 200,
+      height: 40,
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: FanColors.surfaceSunken,
-        border: Border(
-          left: BorderSide(
-            color: FanColors.border.withValues(alpha: 0.06),
-            width: 0.5,
-          ),
+        color: isAd
+            ? FanColors.primary.withValues(alpha: 0.06)
+            : FanColors.surfaceSunken,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isAd
+              ? FanColors.primary.withValues(alpha: 0.15)
+              : FanColors.border.withValues(alpha: 0.06),
+          width: 0.5,
         ),
       ),
-      child: Column(
+      child: Row(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-            child: Row(
-              children: [
-                Icon(Icons.people_outline,
-                    size: 12, color: FanColors.textTertiary),
-                const SizedBox(width: 4),
-                Text(
-                  'Community',
-                  style: TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w600,
-                    color: FanColors.textTertiary,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-              ],
+          // Left icon
+          Container(
+            width: 28,
+            height: 28,
+            margin: const EdgeInsets.only(left: 8),
+            decoration: BoxDecoration(
+              color: isAd
+                  ? FanColors.primary.withValues(alpha: 0.08)
+                  : FanColors.primaryDim,
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: isAd
+                  ? const Text('📢', style: TextStyle(fontSize: 12))
+                  : Text(
+                      currentItem['name']?.substring(0, 1) ?? '👤',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: FanColors.primary,
+                      ),
+                    ),
             ),
           ),
-          Divider(height: 0.5, color: FanColors.border.withValues(alpha: 0.06)),
+          const SizedBox(width: 8),
+          // Content
           Expanded(
-            child: Center(
-              child: Text(
-                'Carousel placeholder',
-                style: TextStyle(
-                  fontSize: 10,
-                  color: FanColors.textTertiary,
+            child: isAd
+                ? Row(
+                    children: [
+                      Text(
+                        '✨ ',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: FanColors.primary,
+                        ),
+                      ),
+                      Text(
+                        'Support Funzy+',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: FanColors.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: FanColors.primary,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          'Learn',
+                          style: TextStyle(
+                            fontSize: 7,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ],
+                  )
+                : Row(
+                    children: [
+                      Text(
+                        currentItem['name'] ?? '',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w500,
+                          color: FanColors.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 4, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: FanColors.primary.withValues(alpha: 0.06),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          currentItem['team'] ?? '',
+                          style: TextStyle(
+                            fontSize: 7,
+                            fontWeight: FontWeight.w500,
+                            color: FanColors.primary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+          // Right arrow / navigation
+          Container(
+            margin: const EdgeInsets.only(right: 4),
+            child: Row(
+              children: [
+                // Dots (mini indicator)
+                ...List.generate(
+                  _carouselItems.length > 6 ? 6 : _carouselItems.length,
+                  (i) {
+                    final active = i == _currentIndex % 6;
+                    return Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 1.5),
+                      width: active ? 10 : 4,
+                      height: 2,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(2),
+                        color: active
+                            ? FanColors.primary
+                            : FanColors.textTertiary.withValues(alpha: 0.2),
+                      ),
+                    );
+                  },
                 ),
-              ),
+                const SizedBox(width: 4),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 14,
+                  color: FanColors.textTertiary.withValues(alpha: 0.3),
+                ),
+              ],
             ),
           ),
         ],
