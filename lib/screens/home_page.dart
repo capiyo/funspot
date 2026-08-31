@@ -2989,6 +2989,9 @@ class _HomePageState extends State<HomePage>
   // ==========================================================================
   // BOTTOM CAROUSEL - UPDATED TO SHOW ALL CHANNELS
   // ==========================================================================
+  // ==========================================================================
+// BOTTOM CAROUSEL - WITH AD INTERLEAVING (3 content items per ad)
+// ==========================================================================
   void _buildCarouselWithAds() {
     if (!mounted) return;
     _isRebuildingCarousel = false;
@@ -3000,16 +3003,36 @@ class _HomePageState extends State<HomePage>
         _allChannels.isNotEmpty ? _allChannels : _userChannels;
     final displayComrades = _getDisplayComrades();
 
-    int adSlotIndex = 0;
+    // Separate lists
+    final comrades = List<Map<String, dynamic>>.from(displayComrades);
+    final channels = List<UserChannel>.from(displayChannels);
+    final adIds = AdHelper.carouselAdUnitIds;
+
     int comradeIndex = 0;
     int channelIndex = 0;
-    int maxItems = 50;
+    int adIndex = 0;
+    const int maxItems = 100;
 
+    // Ad frequency: show 3 content items, then 1 ad
+    const int contentBeforeAd = 3;
+    int itemsSinceLastAd = 0;
+
+    // Interleave: 3 content → 1 ad → 3 content → 1 ad → ...
     for (int i = 0; i < maxItems; i++) {
-      int pattern = i % 3;
+      // Check if we should insert an ad
+      if (itemsSinceLastAd >= contentBeforeAd && adIndex < adIds.length) {
+        final adUnitId = adIds[adIndex % adIds.length];
+        if (adUnitId.isNotEmpty) {
+          newItems.add(CarouselItem.ad(adUnitId: adUnitId));
+          adIndex++;
+          itemsSinceLastAd = 0;
+          continue;
+        }
+      }
 
-      if (pattern == 0 && comradeIndex < displayComrades.length) {
-        final comrade = displayComrades[comradeIndex++];
+      // Add content (alternate between comrade and channel)
+      if (i % 2 == 0 && comradeIndex < comrades.length) {
+        final comrade = comrades[comradeIndex++];
         final isAlreadyComrade =
             _isLoggedIn && _addedComradeIds.contains(comrade['id']);
         final voteText = _voteTexts[comradeIndex % _voteTexts.length];
@@ -3026,31 +3049,54 @@ class _HomePageState extends State<HomePage>
           },
           added: isAlreadyComrade,
         ));
-      } else if (pattern == 1 && channelIndex < displayChannels.length) {
-        final channel = displayChannels[channelIndex++];
+        itemsSinceLastAd++;
+      } else if (channelIndex < channels.length) {
+        final channel = channels[channelIndex++];
         newItems.add(CarouselItem.channel(channelData: channel));
-      } else {
-        final adUnitId = _adUnitIdForIndex(adSlotIndex++);
-        if (adUnitId.isNotEmpty) {
-          newItems.add(CarouselItem.ad(adUnitId: adUnitId));
-        }
-      }
+        itemsSinceLastAd++;
+      } else if (comradeIndex < comrades.length) {
+        // If no more channels, add comrades
+        final comrade = comrades[comradeIndex++];
+        final isAlreadyComrade =
+            _isLoggedIn && _addedComradeIds.contains(comrade['id']);
+        final voteText = _voteTexts[comradeIndex % _voteTexts.length];
 
-      // Break if we've used all items
-      if (comradeIndex >= displayComrades.length &&
-          channelIndex >= displayChannels.length) {
+        newItems.add(CarouselItem.comrade(
+          comradeData: {
+            'id': comrade['id'] ?? '',
+            'nickname': comrade['nickname'] ?? 'Fan',
+            'username': comrade['username'] ?? 'user',
+            'club': comrade['club'] ?? 'Football',
+            'country': comrade['country'] ?? 'World',
+            'votedFor': comrade['votedFor'] ?? voteText['team'] ?? 'Unknown',
+            'fixture': comrade['fixture'] ?? voteText['fixture'] ?? 'Match',
+          },
+          added: isAlreadyComrade,
+        ));
+        itemsSinceLastAd++;
+      } else {
+        // No more content - break
         break;
       }
     }
 
+    // If we still have ad slots and items, add one more ad at the end
+    if (itemsSinceLastAd > 0 && adIndex < adIds.length) {
+      final adUnitId = adIds[adIndex % adIds.length];
+      if (adUnitId.isNotEmpty) {
+        newItems.add(CarouselItem.ad(adUnitId: adUnitId));
+      }
+    }
+
+    // Fallback: if empty, add fallback items
     if (newItems.isEmpty) {
       if (displayChannels.isNotEmpty) {
-        for (final channel in displayChannels) {
+        for (final channel in displayChannels.take(3)) {
           newItems.add(CarouselItem.channel(channelData: channel));
         }
       } else {
         for (int i = 0; i < 4; i++) {
-          final adUnitId = _adUnitIdForIndex(adSlotIndex++);
+          final adUnitId = adIds.isNotEmpty ? adIds[i % adIds.length] : '';
           if (adUnitId.isNotEmpty) {
             newItems.add(CarouselItem.ad(adUnitId: adUnitId));
           }

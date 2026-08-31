@@ -1064,6 +1064,9 @@ static const Duration _commentaryFetchCooldown = Duration(seconds: 20);
   // ==========================================================================
   // BUILD CAROUSEL ITEMS - WITH MATCH UPDATES
   // ==========================================================================
+  // ==========================================================================
+// BUILD CAROUSEL ITEMS - WITH AD INTERLEAVING
+// ==========================================================================
   void _buildCarouselItems() {
     if (!mounted) return;
 
@@ -1071,7 +1074,6 @@ static const Duration _commentaryFetchCooldown = Duration(seconds: 20);
 
     // Always add game info if fixture exists
     if (widget.fixture != null) {
-      // ✅ Use timeElapsed to create a proper Fixture
       final updatedFixture = Fixture(
         id: widget.fixture!.id,
         matchId: widget.fixture!.matchId,
@@ -1092,14 +1094,14 @@ static const Duration _commentaryFetchCooldown = Duration(seconds: 20);
         scrapedAt: widget.fixture!.scrapedAt,
         dateIso: widget.fixture!.dateIso,
         subFixtures: widget.fixture!.subFixtures,
-        timeElapsed: _timeElapsed, // ✅ NEW: use timeElapsed
+        timeElapsed: _timeElapsed,
       );
 
       newItems.add(CarouselItem.matchUpdate(
         matchUpdateData: {
           'homeScore': _homeScore,
           'awayScore': _awayScore,
-          'timeElapsed': _timeElapsed, // ✅ NEW
+          'timeElapsed': _timeElapsed,
           'status': _matchStatus,
           'isLive': _isLive,
         },
@@ -1143,18 +1145,14 @@ static const Duration _commentaryFetchCooldown = Duration(seconds: 20);
       }
     }
 
-    // Insert ads
-    if (newItems.isNotEmpty) {
-      final adIds = AdHelper.carouselAdUnitIds;
-      if (adIds.isNotEmpty && adIds[0].isNotEmpty) {
-        if (newItems.length >= 2 && adIds.length > 1) {
-          newItems.insert(1, CarouselItem.ad(adUnitId: adIds[1]));
-        }
-        newItems.add(CarouselItem.ad(adUnitId: adIds[0]));
-      }
-    }
+    // ==========================================================================
+    // AD INTERLEAVING — inserts ads every [adInterval] content items instead
+    // of only at index 1 and the tail, cycling through all of
+    // AdHelper.carouselAdUnitIds.
+    // ==========================================================================
+    _interleaveAds(newItems);
 
-    // Fallback fixture
+    // Fallback fixture if empty
     if (newItems.isEmpty) {
       final now = DateTime.now();
       final fallbackFixture = Fixture(
@@ -1195,6 +1193,31 @@ static const Duration _commentaryFetchCooldown = Duration(seconds: 20);
           }
         });
       }
+    }
+  }
+
+// ==========================================================================
+// AD INTERLEAVING HELPER — separates content from ads cleanly.
+// ==========================================================================
+  void _interleaveAds(List<CarouselItem> items) {
+    final adIds = AdHelper.carouselAdUnitIds;
+    if (adIds.isEmpty || adIds[0].isEmpty || items.isEmpty) return;
+
+    const int adInterval = 3; // one ad after every 3 content items
+    int adIndex = 0;
+
+    int i = adInterval;
+    while (i < items.length) {
+      items.insert(i, CarouselItem.ad(adUnitId: adIds[adIndex % adIds.length]));
+      adIndex++;
+      i += adInterval +
+          1; // step past the content block *and* the ad just inserted
+    }
+
+    // Keep the old "always end on an ad" behavior, but don't double up if
+    // the loop above already happened to land one there.
+    if (items.last.type != CarouselItemType.ad) {
+      items.add(CarouselItem.ad(adUnitId: adIds[adIndex % adIds.length]));
     }
   }
 

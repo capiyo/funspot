@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
+import '../utils/add_helper.dart';
 
 import '../../modals/Funzy/chat_screen.dart';
 import '../modals/Funzy/swipabledialogue.dart';
@@ -964,6 +965,124 @@ class _HistoryPageState extends State<HistoryPage>
     }
   }
 
+
+  List<Widget> _buildHistoryItemsWithAds() {
+    final List<Widget> widgets = [];
+    final items = _historyItems;
+
+    // Only show ads if user is logged in
+    final bool showAds = widget.isLoggedIn;
+
+    // Get ad unit IDs from AdHelper
+    final List<String> adUnitIds = AdHelper.adSenseInFeedSlotIds;
+    final bool hasAds = adUnitIds.isNotEmpty && adUnitIds[0].isNotEmpty;
+
+    // Ad frequency - insert an ad after every 3 history items
+    const int adFrequency = 2;
+    int adIndex = 0;
+    int adSlotsUsed = 0;
+    const int maxAdSlots = 40; // Maximum ads to show
+
+    for (int i = 0; i < items.length; i++) {
+      // Add the history item
+      widgets.add(_buildHistoryCard(items[i]));
+
+      // Check if we should insert an ad after this item
+      final bool shouldInsertAd = showAds &&
+          hasAds &&
+          (i + 1) % adFrequency == 0 &&
+          adSlotsUsed < maxAdSlots &&
+          i < items.length - 1; // Don't add ad after the last item
+
+      if (shouldInsertAd) {
+        final String adUnitId = adUnitIds[adIndex % adUnitIds.length];
+        widgets.add(_buildAdCard(adUnitId));
+        adIndex++;
+        adSlotsUsed++;
+      }
+    }
+
+    return widgets;
+  }
+
+// ============================================================
+// AD CARD - Compact history-style ad placeholder
+// ============================================================
+
+  Widget _buildAdCard(String adUnitId) {
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: FanColors.surface.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: FanColors.border.withOpacity(0.08),
+          width: 0.5,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: FanColors.primary.withOpacity(0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                '📢',
+                style: TextStyle(fontSize: 14),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Sponsored',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: FanColors.textTertiary,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+                Text(
+                  'Support Funzy+',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: FanColors.textPrimary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: FanColors.primary,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              'Learn More',
+              style: TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ============================================================
   // FETCH VOTERS FOR A FIXTURE
   // ============================================================
@@ -1882,15 +2001,15 @@ class _HistoryPageState extends State<HistoryPage>
   // HISTORY LIST
   // ============================================================
 
-  Widget _buildHistoryList() {
-    return ListView.separated(
-      controller: widget.scrollController,
-      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-      itemCount: _historyItems.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
-      itemBuilder: (context, index) => _buildHistoryCard(_historyItems[index]),
-    );
-  }
+ Widget _buildHistoryList() {
+  final itemsWithAds = _buildHistoryItemsWithAds();
+  
+  return ListView(
+    controller: widget.scrollController,
+    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+    children: itemsWithAds,
+  );
+}
 
   Widget _buildLiveGamesList() {
     return ListView.separated(

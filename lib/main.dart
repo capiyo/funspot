@@ -9,6 +9,7 @@ import 'dart:developer' as developer;
 import 'dart:io' show Platform;
 import 'firebase_options.dart';
 import 'services/local_notification_service.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'dart:js_interop';
 import 'package:web/web.dart' as web;
 import 'dart:async';
@@ -4207,6 +4208,9 @@ void _loadHeavyDataInBackground() {
 // ============================================================================
 Future<void> main() async {
   final widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
+   if (!kIsWeb) {
+    MobileAds.instance.initialize(); // fire-and-forget, not awaited
+  }
 
   // ✅ Only hold the native splash artificially on the very first launch.
   // The OS-level splash image still flashes briefly on every cold start

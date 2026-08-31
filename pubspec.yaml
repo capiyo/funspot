@@ -70,6 +70,7 @@ dependencies:
   # Others
   fluttertoast: ^9.1.0
   country_code_picker: ^3.0.0
+  google_mobile_ads: ^9.1.0
 
 
 dev_dependencies:

@@ -12,6 +12,7 @@ import '../WebView/Hompage/main_content_tabs.dart';
 import '../pages/fixture_page.dart' hide ToastHelper;
 import "../pages/posts_page.dart";
 import '../modals/homepage/notifications_modal.dart';
+import '../utils/add_helper.dart';
 import 'dart:js_interop';
 import 'package:web/web.dart' as web;
 import '../pages/logs.dart';
@@ -49,6 +50,11 @@ class _HomePageWebState extends State<HomePageWeb> {
   web.EventListener? _visibilityListener;
   Timer? _badgePollTimer;
   bool _loadAllDataInFlight = false;
+   List<CarouselItem> _carouselItems = [];
+  bool _isCarouselRunning = false;
+  Timer? _carouselTimer;
+  int _currentCarouselIndex = 0;
+  PageController? _carouselController;
 
   final PageController _arenaPageController = PageController();
   final PageController _feedPageController = PageController();
@@ -1167,6 +1173,8 @@ class _HomePageWebState extends State<HomePageWeb> {
   // UI METHODS
   // ==========================================================================
 
+  // lib/pages/home_page_web.dart - Updated build method
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -1244,14 +1252,8 @@ class _HomePageWebState extends State<HomePageWeb> {
                       onLogout: _handleLogout,
                       isLoggedIn: _isLoggedIn,
                     ),
-                    logsContent: HistoryPage(
-                      userId: _authService.userId ?? '',
-                      username: _authService.username ?? '',
-                      authToken: _authService.authToken,
-                      isLoggedIn: _isLoggedIn,
-                      userChannels: _userChannels,
-                      scrollController: null,
-                    ),
+                    // ✅ Pass the logs content with carousel built-in
+                    logsContent: _buildLogsContentWithCarousel(),
                   ),
                 ),
               ],
@@ -1261,11 +1263,619 @@ class _HomePageWebState extends State<HomePageWeb> {
       ),
     );
   }
+
+// ✅ New method that builds History + Right Panel Carousel
+  Widget _buildLogsContentWithCarousel() {
+    return Row(
+      children: [
+        // History page (main content)
+        Expanded(
+          flex: 3,
+          child: HistoryPage(
+            userId: _authService.userId ?? '',
+            username: _authService.username ?? '',
+            authToken: _authService.authToken,
+            isLoggedIn: _isLoggedIn,
+            userChannels: _userChannels,
+            scrollController: null,
+          ),
+        ),
+        // ✅ Right panel carousel (only when logged in)
+        if (_isLoggedIn) _buildRightPanelCarousel(),
+      ],
+    );
+  }
+
+  // ==========================================================================
+// RIGHT PANEL CAROUSEL - For Logs/History tab (web only)
+// ==========================================================================
+
+  Widget _buildRightPanelCarousel() {
+    // Build carousel items if empty
+    if (_carouselItems.isEmpty) {
+      _buildCarouselItems();
+      _startCarouselAutoScroll();
+    }
+
+    if (_carouselItems.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    _carouselController ??= PageController(initialPage: 0);
+
+    return Container(
+      width: 220,
+      decoration: BoxDecoration(
+        color: FanColors.surface,
+        border: Border(
+          left: BorderSide(
+            color: FanColors.border.withValues(alpha: 0.06),
+            width: 0.5,
+          ),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+            child: Row(
+              children: [
+                Icon(Icons.people_outline,
+                    size: 13, color: FanColors.textTertiary),
+                const SizedBox(width: 6),
+                Text(
+                  'Community',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: FanColors.textTertiary,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: FanColors.primary.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '${_carouselItems.length}',
+                    style: TextStyle(
+                      fontSize: 8,
+                      fontWeight: FontWeight.w600,
+                      color: FanColors.primary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Divider(height: 0.5, color: FanColors.border.withValues(alpha: 0.06)),
+
+          // Carousel
+          Expanded(
+            child: PageView.builder(
+              controller: _carouselController,
+              scrollDirection: Axis.vertical,
+              onPageChanged: (index) {
+                setState(() => _currentCarouselIndex = index);
+              },
+              itemCount: _carouselItems.length,
+              itemBuilder: (context, index) {
+                final item = _carouselItems[index];
+                return Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  child: _buildCarouselItem(item, index),
+                );
+              },
+            ),
+          ),
+
+          // Dots indicator
+          if (_carouselItems.length > 1)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Center(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(
+                    _carouselItems.length > 8 ? 8 : _carouselItems.length,
+                    (i) {
+                      final active = i == _currentCarouselIndex;
+                      return Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 1.5),
+                        width: active ? 14 : 4,
+                        height: 2.5,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(2),
+                          color: active
+                              ? FanColors.primary
+                              : FanColors.textTertiary.withValues(alpha: 0.2),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+// ==========================================================================
+// CAROUSEL ITEM BUILDER
+// ==========================================================================
+
+  Widget _buildCarouselItem(CarouselItem item, int index) {
+    if (item.type == CarouselItemType.comrade) {
+      return _buildComradeCard(item.comradeData!, added: item.added);
+    } else if (item.type == CarouselItemType.channel &&
+        item.channelData != null) {
+      return _buildChannelCard(item.channelData!);
+    } else {
+      return _buildAdCard(item.adUnitId ?? '');
+    }
+  }
+
+// ==========================================================================
+// COMRADE CARD - Compact vertical style
+// ==========================================================================
+
+  Widget _buildComradeCard(Map<String, dynamic> comrade,
+      {required bool added}) {
+    final nickname = comrade['nickname'] ?? 'Fan';
+    final username = comrade['username'] ?? 'user';
+    final team = comrade['votedFor'] ?? 'Unknown';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: FanColors.surfaceSunken,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: FanColors.border.withValues(alpha: 0.06),
+          width: 0.5,
+        ),
+      ),
+      child: Row(
+        children: [
+          // Avatar
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: FanColors.primary.withValues(alpha: 0.08),
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                nickname.isNotEmpty ? nickname[0].toUpperCase() : '?',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: FanColors.primary,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Info
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  nickname,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: FanColors.textPrimary,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  '@$username',
+                  style: TextStyle(
+                    fontSize: 8,
+                    color: FanColors.textTertiary,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          // Vote badge
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+            decoration: BoxDecoration(
+              color: FanColors.primary.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              team.length > 6 ? '${team.substring(0, 6)}..' : team,
+              style: TextStyle(
+                fontSize: 7,
+                fontWeight: FontWeight.w500,
+                color: FanColors.primary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+// ==========================================================================
+// CHANNEL CARD - Compact vertical style
+// ==========================================================================
+
+  Widget _buildChannelCard(UserChannel channel) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: FanColors.surfaceSunken,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: FanColors.border.withValues(alpha: 0.06),
+          width: 0.5,
+        ),
+      ),
+      child: Row(
+        children: [
+          // Avatar
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: FanColors.primaryDim,
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                channel.name.isNotEmpty ? channel.name[0].toUpperCase() : '?',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: FanColors.primary,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Info
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  channel.name,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: FanColors.textPrimary,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  '${channel.memberCount} members',
+                  style: TextStyle(
+                    fontSize: 8,
+                    color: FanColors.textTertiary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Admin badge
+          if (channel.isAdmin)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+              decoration: BoxDecoration(
+                color: FanColors.primary.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                '👑',
+                style: TextStyle(fontSize: 8),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+// ==========================================================================
+// AD CARD - Compact vertical style
+// ==========================================================================
+
+  Widget _buildAdCard(String adUnitId) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: FanColors.surfaceSunken,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: FanColors.border.withValues(alpha: 0.06),
+          width: 0.5,
+        ),
+      ),
+      child: Row(
+        children: [
+          // Icon
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: FanColors.primary.withValues(alpha: 0.06),
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text('📢', style: TextStyle(fontSize: 13)),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Info
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Sponsored',
+                  style: TextStyle(
+                    fontSize: 8,
+                    fontWeight: FontWeight.w500,
+                    color: FanColors.textTertiary,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+                Text(
+                  'Support Funzy+',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: FanColors.textPrimary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // CTA
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+            decoration: BoxDecoration(
+              color: FanColors.primary,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              'Learn',
+              style: TextStyle(
+                fontSize: 7,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+// ==========================================================================
+// BUILD CAROUSEL ITEMS - Populates the carousel with content
+// ==========================================================================
+
+  void _buildCarouselItems() {
+    final newItems = <CarouselItem>[];
+    final displayComrades = _getDisplayComrades();
+    final displayChannels =
+        _userChannels.isNotEmpty ? _userChannels : _allChannels;
+
+    int adSlotIndex = 0;
+    int comradeIndex = 0;
+    int channelIndex = 0;
+    int maxItems = 30;
+
+    // Pattern: 2 content items, then 1 ad
+    for (int i = 0; i < maxItems; i++) {
+      int pattern = i % 3;
+
+      if (pattern == 0 && comradeIndex < displayComrades.length) {
+        final comrade = displayComrades[comradeIndex++];
+        newItems.add(CarouselItem.comrade(
+          comradeData: {
+            'id': comrade['id'] ?? '',
+            'nickname': comrade['nickname'] ?? 'Fan',
+            'username': comrade['username'] ?? 'user',
+            'club': comrade['club'] ?? 'Football',
+            'country': comrade['country'] ?? 'World',
+            'votedFor': comrade['votedFor'] ?? 'Unknown',
+            'fixture': comrade['fixture'] ?? 'Match',
+          },
+          added: false,
+        ));
+      } else if (pattern == 1 && channelIndex < displayChannels.length) {
+        final channel = displayChannels[channelIndex++];
+        newItems.add(CarouselItem.channel(channelData: channel));
+      } else {
+        final adUnitId = _adUnitIdForIndex(adSlotIndex++);
+        if (adUnitId.isNotEmpty) {
+          newItems.add(CarouselItem.ad(adUnitId: adUnitId));
+        }
+      }
+
+      // Break if we've used all items
+      if (comradeIndex >= displayComrades.length &&
+          channelIndex >= displayChannels.length) {
+        break;
+      }
+    }
+
+    // Fallback: if empty, add ads
+    if (newItems.isEmpty) {
+      for (int i = 0; i < 4; i++) {
+        final adUnitId = _adUnitIdForIndex(adSlotIndex++);
+        if (adUnitId.isNotEmpty) {
+          newItems.add(CarouselItem.ad(adUnitId: adUnitId));
+        }
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        _carouselItems = newItems;
+      });
+    }
+  }
+
+// ==========================================================================
+// GET DISPLAY COMRADES - From user channels
+// ==========================================================================
+
+  List<Map<String, dynamic>> _getDisplayComrades() {
+    if (_userChannels.isEmpty) return [];
+
+    final Set<String> comradeIds = {};
+    final List<Map<String, dynamic>> comrades = [];
+
+    for (final channel in _userChannels) {
+      for (final member in channel.members) {
+        if (member.userId != _authService.userId &&
+            !comradeIds.contains(member.userId)) {
+          comradeIds.add(member.userId);
+          comrades.add({
+            'id': member.userId,
+            'nickname': member.username,
+            'username': member.username,
+            'club': 'Fan',
+            'country': 'World',
+            'votedFor': 'Unknown',
+            'fixture': 'Match',
+          });
+        }
+      }
+    }
+    return comrades;
+  }
+
+// ==========================================================================
+// AD UNIT ID HELPER
+// ==========================================================================
+
+  String _adUnitIdForIndex(int index) {
+    final ids = AdHelper.carouselAdUnitIds;
+    return ids.isEmpty ? '' : ids[index % ids.length];
+  }
+
+// ==========================================================================
+// CAROUSEL AUTO-SCROLL
+// ==========================================================================
+
+  void _startCarouselAutoScroll() {
+    if (_isCarouselRunning || _carouselItems.length <= 1) return;
+    _isCarouselRunning = true;
+    _carouselTimer?.cancel();
+
+    bool goingForward = true;
+    _carouselTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      if (!mounted || !_isCarouselRunning) {
+        timer.cancel();
+        _isCarouselRunning = false;
+        return;
+      }
+
+      final controller = _carouselController;
+      if (controller == null || !controller.hasClients) {
+        timer.cancel();
+        _isCarouselRunning = false;
+        return;
+      }
+
+      final itemCount = _carouselItems.length;
+      if (itemCount <= 1) {
+        timer.cancel();
+        _isCarouselRunning = false;
+        return;
+      }
+
+      int currentPage = controller.page?.round() ?? _currentCarouselIndex;
+      int nextIndex;
+      if (goingForward) {
+        nextIndex = currentPage + 1;
+        if (nextIndex >= itemCount) {
+          goingForward = false;
+          nextIndex = currentPage - 1;
+        }
+      } else {
+        nextIndex = currentPage - 1;
+        if (nextIndex < 0) {
+          goingForward = true;
+          nextIndex = currentPage + 1;
+        }
+      }
+      nextIndex = nextIndex.clamp(0, itemCount - 1);
+      controller.animateToPage(nextIndex,
+          duration: const Duration(milliseconds: 400),
+          curve: Curves.easeInOutCubic);
+    });
+  }
+
+  void _stopCarouselAutoScroll() {
+    _isCarouselRunning = false;
+    _carouselTimer?.cancel();
+    _carouselTimer = null;
+  }
+
+
+
+
+
+
+
+
+
+
+
+
 }
 
 // ============================================================================
 // PENDING REQUESTS MODAL - SAME AS MOBILE
 // ============================================================================
+enum CarouselItemType { comrade, channel, ad }
+
+class CarouselItem {
+  final CarouselItemType type;
+  final Map<String, dynamic>? comradeData;
+  final bool added;
+  final String? adUnitId;
+  final UserChannel? channelData;
+
+  CarouselItem.comrade({this.comradeData, this.added = false})
+      : type = CarouselItemType.comrade,
+        adUnitId = null,
+        channelData = null;
+
+  CarouselItem.channel({required this.channelData})
+      : type = CarouselItemType.channel,
+        comradeData = null,
+        added = false,
+        adUnitId = null;
+
+  CarouselItem.ad({required this.adUnitId})
+      : type = CarouselItemType.ad,
+        comradeData = null,
+        added = false,
+        channelData = null;
+}
 
 class PendingRequestsModal extends StatefulWidget {
   final String userId;

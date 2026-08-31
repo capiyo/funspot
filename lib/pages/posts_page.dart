@@ -14,12 +14,64 @@ import 'fan_Funzy_design.dart';
 import '../services/auth_service.dart';
 import '../modals/login_modal.dart';
 import 'package:flutter/foundation.dart';
+import '../widgets/web_native_ad_card.dart';
 import '../main.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:video_player/video_player.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 // ========== GLOBAL POSTS CACHE MANAGER ==========
+class _NativeAdCard extends StatefulWidget {
+  final String adUnitId;
+  const _NativeAdCard({required this.adUnitId});
+
+  @override
+  State<_NativeAdCard> createState() => _NativeAdCardState();
+}
+
+class _NativeAdCardState extends State<_NativeAdCard> {
+  NativeAd? _ad;
+  bool _loaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ad = NativeAd(
+      adUnitId: widget.adUnitId,
+      factoryId: 'listTile', // must be registered natively on Android/iOS
+      listener: NativeAdListener(
+        onAdLoaded: (ad) {
+          if (mounted) setState(() => _loaded = true);
+        },
+        onAdFailedToLoad: (ad, error) {
+          debugPrint('❌ Native ad failed: $error');
+          ad.dispose();
+        },
+      ),
+      request: const AdRequest(),
+    )..load();
+  }
+
+  @override
+  void dispose() {
+    _ad?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_loaded || _ad == null) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 1),
+      constraints: const BoxConstraints(minHeight: 90, maxHeight: 350),
+      child: AdWidget(ad: _ad!),
+    );
+  }
+}
+
+
+
 class GlobalPostsCacheManager {
   static final GlobalPostsCacheManager _instance =
       GlobalPostsCacheManager._internal();
@@ -499,8 +551,8 @@ class _PostsPageState extends State<PostsPage> with WidgetsBindingObserver {
   DateTime? _lastSyncTime;
   static const Duration _backgroundSyncInterval = Duration(minutes: 30);
   static const Duration _minSyncInterval = Duration(minutes: 5);
-  final int _adFrequency = 5;
-  static const int _maxAdSlots = 10;
+  final int _adFrequency = 3;
+  static const int _maxAdSlots = 40;
   final bool _showAds = true;
 
   // Logout flags
@@ -1672,7 +1724,7 @@ class _PostsPageState extends State<PostsPage> with WidgetsBindingObserver {
   // BUILD METHOD
   // ==========================================================================
 
-  @override
+    @override
   Widget build(BuildContext context) {
     List<Widget> children = [];
 
@@ -1681,8 +1733,22 @@ class _PostsPageState extends State<PostsPage> with WidgetsBindingObserver {
     } else if (error.isNotEmpty && posts.isEmpty) {
       children.add(_buildErrorState());
     } else {
+      int adSlotsUsed = 0;
       for (int i = 0; i < posts.length; i++) {
         children.add(_buildPostCard(posts[i], i));
+
+        final shouldInsertAd = _showAds &&
+            (i + 1) % _adFrequency == 0 &&
+            adSlotsUsed < _maxAdSlots;
+
+        if (shouldInsertAd) {
+          children.add(
+            kIsWeb
+                ? WebNativeAdCard(slotIndex: adSlotsUsed)
+                : _NativeAdCard(adUnitId: AdHelper.postsFeedNativeAdUnitId),
+          );
+          adSlotsUsed++;
+        }
       }
 
       if (posts.isEmpty && !loading) {
