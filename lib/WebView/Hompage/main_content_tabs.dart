@@ -27,6 +27,7 @@ class _MainContentTabsState extends State<MainContentTabs> {
   Timer? _carouselTimer;
   bool _isRunning = false;
 
+  // Sample comrades data
   final List<Map<String, dynamic>> _sampleComrades = const [
     {'name': '⚽ GoalMachine', 'team': 'Real Madrid'},
     {'name': '🔥 FireStriker', 'team': 'Barcelona'},
@@ -34,6 +35,10 @@ class _MainContentTabsState extends State<MainContentTabs> {
     {'name': '🎯 Sniper', 'team': 'PSG'},
     {'name': '💪 PowerShot', 'team': 'Liverpool'},
     {'name': '✨ MagicFeet', 'team': 'Man City'},
+    {'name': '🧠 TacticalGenius', 'team': 'Chelsea'},
+    {'name': '🌟 StarPlayer', 'team': 'Arsenal'},
+    {'name': '⚡ LightningBolt', 'team': 'Dortmund'},
+    {'name': '🎨 Playmaker', 'team': 'Ajax'},
   ];
 
   @override
@@ -52,7 +57,7 @@ class _MainContentTabsState extends State<MainContentTabs> {
   void _buildCarouselItems() {
     final items = <Map<String, dynamic>>[];
 
-    // Add sample comrades
+    // Add comrades
     for (var comrade in _sampleComrades) {
       items.add({
         'type': 'comrade',
@@ -68,6 +73,7 @@ class _MainContentTabsState extends State<MainContentTabs> {
 
     for (int i = 0; i < items.length; i++) {
       finalItems.add(items[i]);
+      // Insert ad after every 2 comrades (so every 3rd item)
       if ((i + 1) % 3 == 0 && adIndex < adIds.length) {
         finalItems.add({
           'type': 'ad',
@@ -153,7 +159,10 @@ class _MainContentTabsState extends State<MainContentTabs> {
     );
   }
 
-  // ✅ Logs Tab with Snackbar-style Carousel at bottom
+  // ==========================================================================
+  // LOGS TAB WITH SNACKBAR CAROUSEL
+  // ==========================================================================
+
   Widget _buildLogsTab() {
     return Container(
       decoration: BoxDecoration(
@@ -185,7 +194,7 @@ class _MainContentTabsState extends State<MainContentTabs> {
           Expanded(
             child: widget.logsContent,
           ),
-          // ✅ Snackbar-style carousel at bottom
+          // ✅ Snackbar-style carousel at bottom (compact)
           _buildSnackbarCarousel(),
         ],
       ),
@@ -193,7 +202,7 @@ class _MainContentTabsState extends State<MainContentTabs> {
   }
 
   // ==========================================================================
-  // SNACKBAR-STYLE CAROUSEL - Horizontal, compact, at bottom
+  // SNACKBAR-STYLE CAROUSEL - Compact, horizontal, at bottom
   // ==========================================================================
 
   Widget _buildSnackbarCarousel() {
@@ -205,27 +214,27 @@ class _MainContentTabsState extends State<MainContentTabs> {
     final isAd = currentItem['type'] == 'ad';
 
     return Container(
-      height: 40,
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      height: 34,
+      margin: const EdgeInsets.fromLTRB(12, 4, 12, 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: BoxDecoration(
         color: isAd
-            ? FanColors.primary.withValues(alpha: 0.06)
+            ? FanColors.primary.withValues(alpha: 0.05)
             : FanColors.surfaceSunken,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(6),
         border: Border.all(
           color: isAd
-              ? FanColors.primary.withValues(alpha: 0.15)
+              ? FanColors.primary.withValues(alpha: 0.12)
               : FanColors.border.withValues(alpha: 0.06),
           width: 0.5,
         ),
       ),
       child: Row(
         children: [
-          // Left icon
+          // Icon
           Container(
-            width: 28,
-            height: 28,
-            margin: const EdgeInsets.only(left: 8),
+            width: 22,
+            height: 22,
             decoration: BoxDecoration(
               color: isAd
                   ? FanColors.primary.withValues(alpha: 0.08)
@@ -234,18 +243,18 @@ class _MainContentTabsState extends State<MainContentTabs> {
             ),
             child: Center(
               child: isAd
-                  ? const Text('📢', style: TextStyle(fontSize: 12))
+                  ? const Text('📢', style: TextStyle(fontSize: 10))
                   : Text(
                       currentItem['name']?.substring(0, 1) ?? '👤',
                       style: TextStyle(
-                        fontSize: 10,
+                        fontSize: 9,
                         fontWeight: FontWeight.w700,
                         color: FanColors.primary,
                       ),
                     ),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 6),
           // Content
           Expanded(
             child: isAd
@@ -254,7 +263,7 @@ class _MainContentTabsState extends State<MainContentTabs> {
                       Text(
                         '✨ ',
                         style: TextStyle(
-                          fontSize: 10,
+                          fontSize: 9,
                           fontWeight: FontWeight.w600,
                           color: FanColors.primary,
                         ),
@@ -262,22 +271,22 @@ class _MainContentTabsState extends State<MainContentTabs> {
                       Text(
                         'Support Funzy+',
                         style: TextStyle(
-                          fontSize: 10,
+                          fontSize: 9,
                           color: FanColors.textPrimary,
                         ),
                       ),
-                      const SizedBox(width: 6),
+                      const SizedBox(width: 4),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 1),
+                            horizontal: 5, vertical: 1),
                         decoration: BoxDecoration(
                           color: FanColors.primary,
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
                           'Learn',
                           style: TextStyle(
-                            fontSize: 7,
+                            fontSize: 6.5,
                             fontWeight: FontWeight.w600,
                             color: Colors.white,
                           ),
@@ -290,12 +299,12 @@ class _MainContentTabsState extends State<MainContentTabs> {
                       Text(
                         currentItem['name'] ?? '',
                         style: TextStyle(
-                          fontSize: 10,
+                          fontSize: 9,
                           fontWeight: FontWeight.w500,
                           color: FanColors.textPrimary,
                         ),
                       ),
-                      const SizedBox(width: 6),
+                      const SizedBox(width: 4),
                       Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 4, vertical: 1),
@@ -306,7 +315,7 @@ class _MainContentTabsState extends State<MainContentTabs> {
                         child: Text(
                           currentItem['team'] ?? '',
                           style: TextStyle(
-                            fontSize: 7,
+                            fontSize: 6.5,
                             fontWeight: FontWeight.w500,
                             color: FanColors.primary,
                           ),
@@ -315,37 +324,35 @@ class _MainContentTabsState extends State<MainContentTabs> {
                     ],
                   ),
           ),
-          // Right arrow / navigation
-          Container(
-            margin: const EdgeInsets.only(right: 4),
-            child: Row(
-              children: [
-                // Dots (mini indicator)
-                ...List.generate(
-                  _carouselItems.length > 6 ? 6 : _carouselItems.length,
-                  (i) {
-                    final active = i == _currentIndex % 6;
-                    return Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 1.5),
-                      width: active ? 10 : 4,
-                      height: 2,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(2),
-                        color: active
-                            ? FanColors.primary
-                            : FanColors.textTertiary.withValues(alpha: 0.2),
-                      ),
-                    );
-                  },
+          // Dots indicator (mini)
+          Row(
+            children: [
+              ...List.generate(
+                _carouselItems.length > 5 ? 5 : _carouselItems.length,
+                (i) {
+                  final active = i == _currentIndex % 5;
+                  return Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 1.5),
+                    width: active ? 8 : 3,
+                    height: 2,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(1),
+                      color: active
+                          ? FanColors.primary
+                          : FanColors.textTertiary.withValues(alpha: 0.2),
+                    ),
+                  );
+                },
+              ),
+              if (_carouselItems.length > 5)
+                Text(
+                  '+${_carouselItems.length - 5}',
+                  style: TextStyle(
+                    fontSize: 6,
+                    color: FanColors.textTertiary.withValues(alpha: 0.4),
+                  ),
                 ),
-                const SizedBox(width: 4),
-                Icon(
-                  Icons.chevron_right_rounded,
-                  size: 14,
-                  color: FanColors.textTertiary.withValues(alpha: 0.3),
-                ),
-              ],
-            ),
+            ],
           ),
         ],
       ),
