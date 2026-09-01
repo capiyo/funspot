@@ -22,10 +22,14 @@ class WebNativeAdCard extends StatefulWidget {
   State<WebNativeAdCard> createState() => _WebNativeAdCardState();
 }
 
+
 class _WebNativeAdCardState extends State<WebNativeAdCard> {
   late final String _viewType;
   late final String _slotId;
   bool _pushed = false;
+  bool _checkedFill = false;
+  bool _isFilled = false;
+  web.HTMLElement? _insElement;
 
   @override
   void initState() {
@@ -51,41 +55,78 @@ class _WebNativeAdCardState extends State<WebNativeAdCard> {
       ins.setAttribute('data-ad-client', AdHelper.adSenseClientId);
       ins.setAttribute('data-ad-slot', _slotId);
 
+      _insElement = ins; // ✅ keep a reference so we can poll it later
       container.append(ins);
       return container;
     });
 
-    // Wait until this frame is committed (element is actually in the live
-    // DOM) before asking AdSense to fill it.
     WidgetsBinding.instance.addPostFrameCallback((_) => _pushAd());
   }
 
- void _pushAd() {
+  void _pushAd() {
     if (_pushed || !mounted) return;
     _pushed = true;
     try {
       final win = web.window as JSObject;
-      // window.adsbygoogle = window.adsbygoogle || [];
       if (win['adsbygoogle'] == null) {
         win['adsbygoogle'] = JSArray();
       }
       final adsbygoogle = win['adsbygoogle'] as JSObject;
-      // window.adsbygoogle.push({});
       adsbygoogle.callMethod('push'.toJS, JSObject());
+
+      // ✅ AdSense sets data-ad-status async, usually within ~1s. Poll a
+      // few times before giving up and treating it as unfilled — avoids
+      // both a too-early false negative and hanging forever if it never
+      // resolves (e.g. adblock intercepted the fill call silently).
+      _pollFillStatus(attempt: 0);
     } catch (e) {
       debugPrint('❌ AdSense push failed for slot $_slotId: $e');
+      if (mounted) setState(() => _checkedFill = true); // treat as unfilled
     }
   }
+
+  void _pollFillStatus({required int attempt}) {
+    const maxAttempts = 10;
+    const interval = Duration(milliseconds: 300);
+
+    Future.delayed(interval, () {
+      if (!mounted) return;
+      final status = _insElement?.getAttribute('data-ad-status');
+
+      if (status == 'filled') {
+        setState(() {
+          _isFilled = true;
+          _checkedFill = true;
+        });
+        return;
+      }
+      if (status == 'unfilled' || attempt >= maxAttempts) {
+        setState(() {
+          _isFilled = false;
+          _checkedFill = true;
+        });
+        return;
+      }
+      _pollFillStatus(attempt: attempt + 1);
+    });
+  }
+
   @override
-Widget build(BuildContext context) {
-  return SizedBox(
-    width: double.infinity,
-    child: Container(
-      key: ValueKey(_viewType),
-      constraints: const BoxConstraints(minHeight: 100, maxHeight: 400),
-      margin: const EdgeInsets.only(bottom: 1),
-      child: HtmlElementView(viewType: _viewType),
-    ),
-  );
-}
+  Widget build(BuildContext context) {
+    // Nothing to show yet, or confirmed no fill — collapse to zero height
+    // instead of reserving blank space.
+    if (!_checkedFill || !_isFilled) {
+      return const SizedBox.shrink();
+    }
+
+    return SizedBox(
+      width: double.infinity,
+      child: Container(
+        key: ValueKey(_viewType),
+        constraints: const BoxConstraints(minHeight: 100, maxHeight: 400),
+        margin: const EdgeInsets.only(bottom: 1),
+        child: HtmlElementView(viewType: _viewType),
+      ),
+    );
+  }
 }
