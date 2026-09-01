@@ -8,6 +8,8 @@ import 'package:flutter/foundation.dart' show kDebugMode, compute;
 import '../modals/login_modal.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, kDebugMode, compute;
 import '../modals/FAB/add_post_modal.dart';
+import '../widgets/web_native_ad_card.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 import '../modals/homepage/notifications_modal.dart';
 import '../models/fixture_models.dart' as models;
@@ -3265,37 +3267,38 @@ class _HomePageState extends State<HomePage>
   // ==========================================================================
   // CAROUSEL ITEMS - UPDATED WITH CHANNEL LIMIT CHECKING
   // ==========================================================================
-  Widget _buildCarouselItem(CarouselItem item, int index) {
-    final isLeftAligned = index % 2 == 0;
+ Widget _buildCarouselItem(CarouselItem item, int index) {
+  final isLeftAligned = index % 2 == 0;
 
-    if (item.type == CarouselItemType.comrade) {
-      return SpeechBubble(
-        isLeftAligned: isLeftAligned,
-        child: _buildComradeCard(item.comradeData!, added: item.added),
-      );
-    }
-
-    if (item.type == CarouselItemType.channel && item.channelData != null) {
-      return SpeechBubble(
-        isLeftAligned: isLeftAligned,
-        child: _buildChannelCard(item.channelData!),
-      );
-    }
-
-    final adUnitId = item.adUnitId ?? '';
-
-    if (adUnitId.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
+  if (item.type == CarouselItemType.comrade) {
     return SpeechBubble(
       isLeftAligned: isLeftAligned,
-      child: SizedBox(
-        height: 55,
-      ),
+      child: _buildComradeCard(item.comradeData!, added: item.added),
     );
   }
 
+  if (item.type == CarouselItemType.channel && item.channelData != null) {
+    return SpeechBubble(
+      isLeftAligned: isLeftAligned,
+      child: _buildChannelCard(item.channelData!),
+    );
+  }
+
+  final adUnitId = item.adUnitId ?? '';
+  if (adUnitId.isEmpty) {
+    return const SizedBox.shrink();
+  }
+
+  return SpeechBubble(
+    isLeftAligned: isLeftAligned,
+    child: SizedBox(
+      height: 55,
+      child: kIsWeb
+          ? WebNativeAdCard(slotIndex: index)
+          : NativeAdCard(adUnitId: adUnitId),
+    ),
+  );
+}
   // ==========================================================================
   // COMRADE CARD - UPDATED WITH CHANNEL LIMIT AND FULL BUTTON
   // ==========================================================================

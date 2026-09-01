@@ -77,12 +77,15 @@ class _WebNativeAdCardState extends State<WebNativeAdCard> {
     }
   }
   @override
-  Widget build(BuildContext context) {
-    return Container(
+Widget build(BuildContext context) {
+  return SizedBox(
+    width: double.infinity,
+    child: Container(
       key: ValueKey(_viewType),
       constraints: const BoxConstraints(minHeight: 100, maxHeight: 400),
       margin: const EdgeInsets.only(bottom: 1),
       child: HtmlElementView(viewType: _viewType),
-    );
-  }
+    ),
+  );
+}
 }

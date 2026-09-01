@@ -11,6 +11,7 @@ import 'package:fluttertoast/fluttertoast.dart';
 import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
 import '../utils/add_helper.dart';
+import 'posts_page.dart';
 
 import '../../modals/Funzy/chat_screen.dart';
 import '../modals/Funzy/swipabledialogue.dart';
@@ -22,6 +23,8 @@ import '../modals/Funzy/match_details.dart';
 import '../modals/Funzy/aftermatch_modal.dart';
 import '../../services/web_soecket.dart';
 import "../screens/home_page.dart";
+import 'package:flutter/foundation.dart' show kIsWeb;
+import '../widgets/web_native_ad_card.dart';
 
 // ============================================================
 // USE VOTER FROM FIXTURE_MODELS DIRECTLY
@@ -994,9 +997,9 @@ class _HistoryPageState extends State<HistoryPage>
           adSlotsUsed < maxAdSlots &&
           i < items.length - 1; // Don't add ad after the last item
 
-      if (shouldInsertAd) {
+    if (shouldInsertAd) {
         final String adUnitId = adUnitIds[adIndex % adUnitIds.length];
-        widgets.add(_buildAdCard(adUnitId));
+        widgets.add(_buildAdCard(adSlotsUsed, adUnitId));
         adIndex++;
         adSlotsUsed++;
       }
@@ -1009,77 +1012,12 @@ class _HistoryPageState extends State<HistoryPage>
 // AD CARD - Compact history-style ad placeholder
 // ============================================================
 
-  Widget _buildAdCard(String adUnitId) {
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 5),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: FanColors.surface.withOpacity(0.5),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: FanColors.border.withOpacity(0.08),
-          width: 0.5,
-        ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              color: FanColors.primary.withOpacity(0.1),
-              shape: BoxShape.circle,
-            ),
-            child: Center(
-              child: Text(
-                '📢',
-                style: TextStyle(fontSize: 14),
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'Sponsored',
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    color: FanColors.textTertiary,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-                Text(
-                  'Support Funzy+',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: FanColors.textPrimary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: FanColors.primary,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text(
-              'Learn More',
-              style: TextStyle(
-                fontSize: 9,
-                fontWeight: FontWeight.w600,
-                color: Colors.white,
-              ),
-            ),
-          ),
-        ],
-      ),
+  Widget _buildAdCard(int slotIndex, String adUnitId) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: kIsWeb
+          ? WebNativeAdCard(slotIndex: slotIndex)
+          : NativeAdCard(adUnitId: adUnitId),
     );
   }
 

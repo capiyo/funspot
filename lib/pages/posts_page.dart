@@ -22,15 +22,15 @@ import 'package:video_player/video_player.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 // ========== GLOBAL POSTS CACHE MANAGER ==========
-class _NativeAdCard extends StatefulWidget {
+class NativeAdCard extends StatefulWidget {
   final String adUnitId;
-  const _NativeAdCard({required this.adUnitId});
+  const NativeAdCard({super.key, required this.adUnitId});
 
   @override
-  State<_NativeAdCard> createState() => _NativeAdCardState();
+  State<NativeAdCard> createState() => _NativeAdCardState();
 }
 
-class _NativeAdCardState extends State<_NativeAdCard> {
+class _NativeAdCardState extends State<NativeAdCard> {
   NativeAd? _ad;
   bool _loaded = false;
 
@@ -1763,7 +1763,7 @@ class _PostsPageState extends State<PostsPage> with WidgetsBindingObserver {
           children.add(
             kIsWeb
                 ? WebNativeAdCard(slotIndex: adSlotsUsed)
-                : _NativeAdCard(adUnitId: AdHelper.postsFeedNativeAdUnitId),
+                :  NativeAdCard(adUnitId: AdHelper.postsFeedNativeAdUnitId),
           );
           adSlotsUsed++;
         }

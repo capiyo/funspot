@@ -14,9 +14,12 @@ import "../FAB/profile_modal.dart";
 import 'package:intl/intl.dart';
 import '../Funzy/aftermatch_modal.dart'; // ✅ NEW
 import 'package:path_provider/path_provider.dart';
+import '../../widgets/web_native_ad_card.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import '../../models/chat_message.dart';
 import '../../services/bet_service.dart';
 import 'package:fluttertoast/fluttertoast.dart';
+import "../../pages/posts_page.dart";
 import 'package:http/http.dart' as http;
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as path;
@@ -172,7 +175,6 @@ class SpeechBubble extends StatelessWidget {
   final bool isLeftAligned;
   final EdgeInsets padding;
 
-  
   const SpeechBubble({
     super.key,
     required this.child,
@@ -694,7 +696,7 @@ class _VideoThumbnailState extends State<_VideoThumbnail> {
     if (_loading || _thumbnail == null) {
       return Container(
           color: FanColors.surfaceSunken,
-          child:  Center(
+          child: Center(
               child: Icon(Icons.videocam,
                   size: 36, color: FanColors.textTertiary)));
     }
@@ -803,8 +805,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Timer? _latestLiveHighlightTimer;
   String? _currentUploadId;
   // Add near your other static fields in _ChatScreenState:
-static final Map<String, DateTime> _lastCommentaryFetchAt = {};
-static const Duration _commentaryFetchCooldown = Duration(seconds: 20);
+  static final Map<String, DateTime> _lastCommentaryFetchAt = {};
+  static const Duration _commentaryFetchCooldown = Duration(seconds: 20);
 
   // ✅ NEW: Check if game is completed for aftermatch modal
   bool get _isCompletedGame =>
@@ -1701,8 +1703,17 @@ static const Duration _commentaryFetchCooldown = Duration(seconds: 20);
       case CarouselItemType.comrade:
         return _buildComradeCard(item.comradeData!, item.added, index);
       case CarouselItemType.ad:
-        return FallbackAdWidget(
-          dotsWidget: _carouselItems.length > 1 ? _buildCarouselDots() : null,
+        final adUnitId = item.adUnitId;
+        if (adUnitId == null || adUnitId.isEmpty) {
+          return FallbackAdWidget(
+            dotsWidget: _carouselItems.length > 1 ? _buildCarouselDots() : null,
+          );
+        }
+        return SizedBox(
+          height: 48,
+          child: kIsWeb
+              ? WebNativeAdCard(slotIndex: index)
+              : NativeAdCard(adUnitId: adUnitId),
         );
     }
   }
@@ -2046,246 +2057,248 @@ static const Duration _commentaryFetchCooldown = Duration(seconds: 20);
   // ==========================================================================
 
   void _openVotesModal() async {
-  if (widget.fixture == null) return;
+    if (widget.fixture == null) return;
 
-  final bool isCompleted =
-      _matchStatus == 'completed' || _matchStatus == 'finished';
+    final bool isCompleted =
+        _matchStatus == 'completed' || _matchStatus == 'finished';
 
-  if (isCompleted) {
-    final bool showFullModal = await _checkVotesButtonVisibility(); // ← ADD THIS LINE
+    if (isCompleted) {
+      final bool showFullModal =
+          await _checkVotesButtonVisibility(); // ← ADD THIS LINE
+
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (context) => SwipeableAftermatchReviewModal(
+          fixture: widget.fixture!,
+          userId: widget.userId,
+          username: widget.username,
+          authToken: widget.authToken,
+          channelId: widget.channelId,
+          isLoggedIn: widget.isLoggedIn,
+          showPledgesTab: showFullModal, // ← ADD
+          showBetsTab: showFullModal, // ← ADD
+          showSubFixturesTab: showFullModal, // ← ADD
+        ),
+      );
+      return;
+    }
+
+    // Original logic for live/upcoming games — already correct, unchanged
+    final bool showFullModal = await _checkVotesButtonVisibility();
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => SwipeableAftermatchReviewModal(
+      builder: (context) => SwipeableVotePledgeModal(
         fixture: widget.fixture!,
         userId: widget.userId,
         username: widget.username,
         authToken: widget.authToken,
-        channelId: widget.channelId,
         isLoggedIn: widget.isLoggedIn,
-        showPledgesTab: showFullModal,      // ← ADD
-        showBetsTab: showFullModal,         // ← ADD
-        showSubFixturesTab: showFullModal,  // ← ADD
+        hasUserVoted: _userVoteSelection != null,
+        userVoteSelection: _userVoteSelection,
+        comradesList: widget.comradesList,
+        showPledgesTab: showFullModal,
+        showBetsTab: showFullModal,
+        showSubFixturesTab: showFullModal,
+        channelId: widget.channelId,
+        onVote: _castQuickVote,
+        onPledge: _handlePledge,
       ),
     );
-    return;
   }
-
-  // Original logic for live/upcoming games — already correct, unchanged
-  final bool showFullModal = await _checkVotesButtonVisibility();
-
-  showModalBottomSheet(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    builder: (context) => SwipeableVotePledgeModal(
-      fixture: widget.fixture!,
-      userId: widget.userId,
-      username: widget.username,
-      authToken: widget.authToken,
-      isLoggedIn: widget.isLoggedIn,
-      hasUserVoted: _userVoteSelection != null,
-      userVoteSelection: _userVoteSelection,
-      comradesList: widget.comradesList,
-      showPledgesTab: showFullModal,
-      showBetsTab: showFullModal,
-      showSubFixturesTab: showFullModal,
-      channelId: widget.channelId,
-      onVote: _castQuickVote,
-      onPledge: _handlePledge,
-    ),
-  );
-}
   // ============================================================================
 // MEDIA PICKER METHODS - WITH CAPTION DIALOG
 // ============================================================================
 
   /// ✅ Show caption dialog after selecting image
- 
- Future<void> _pickAndSendVideo() async {
-  if (_isUploadingMedia) return;
 
-  final XFile? video = await _picker.pickVideo(source: ImageSource.gallery);
-  if (video == null) return;
+  Future<void> _pickAndSendVideo() async {
+    if (_isUploadingMedia) return;
 
-  final caption = await _showCaptionDialog(
-    hintText: 'Add a caption to your video...',
-    isImage: false,
-  );
+    final XFile? video = await _picker.pickVideo(source: ImageSource.gallery);
+    if (video == null) return;
 
-  if (caption == null) return;
-
-  setState(() => _isUploadingMedia = true);
-
-  try {
-    final videoBytes = await video.readAsBytes();
-
-    Uint8List? thumbnailBytes;
-    String thumbnailName =
-        'thumb_${DateTime.now().millisecondsSinceEpoch}.jpg';
-
-    if (kIsWeb) {
-      // Try a real client-side frame grab first — loads the video into a
-      // hidden <video> element, seeks in, and draws to a <canvas>.
-      final webThumb = await generateWebVideoThumbnail(
-        videoBytes,
-        maxWidth: 400,
-        quality: 0.75,
-      );
-
-      if (webThumb != null) {
-        thumbnailBytes = webThumb;
-      } else {
-        // Frame grab failed (unsupported codec in this browser, etc.) —
-        // fall back to a 1x1 transparent placeholder rather than blocking
-        // the send. enqueueChatVideo/_runChatVideoUpload require *some*
-        // thumbnail bytes for the upload payload.
-        thumbnailBytes = Uint8List.fromList([
-          0x89,
-          0x50,
-          0x4E,
-          0x47,
-          0x0D,
-          0x0A,
-          0x1A,
-          0x0A,
-          0x00,
-          0x00,
-          0x00,
-          0x0D,
-          0x49,
-          0x48,
-          0x44,
-          0x52,
-          0x00,
-          0x00,
-          0x00,
-          0x01,
-          0x00,
-          0x00,
-          0x00,
-          0x01,
-          0x08,
-          0x06,
-          0x00,
-          0x00,
-          0x00,
-          0x1F,
-          0x15,
-          0xC4,
-          0x89,
-          0x00,
-          0x00,
-          0x00,
-          0x0A,
-          0x49,
-          0x44,
-          0x41,
-          0x54,
-          0x78,
-          0x9C,
-          0x63,
-          0x00,
-          0x01,
-          0x00,
-          0x00,
-          0x05,
-          0x00,
-          0x01,
-          0x0D,
-          0x0A,
-          0x2D,
-          0xB4,
-          0x00,
-          0x00,
-          0x00,
-          0x00,
-          0x49,
-          0x45,
-          0x4E,
-          0x44,
-          0xAE,
-          0x42,
-          0x60,
-          0x82,
-        ]);
-      }
-    } else {
-      final String? thumbnailPath = await VideoThumbnail.thumbnailFile(
-        video: video.path,
-        thumbnailPath: (await getTemporaryDirectory()).path,
-        imageFormat: ImageFormat.JPEG,
-        quality: 75,
-        maxHeight: 200,
-        maxWidth: 200,
-      );
-
-      if (thumbnailPath == null) {
-        _flashError('Failed to generate thumbnail');
-        setState(() => _isUploadingMedia = false);
-        return;
-      }
-
-      thumbnailBytes = await File(thumbnailPath).readAsBytes();
-      thumbnailName = thumbnailPath.split('/').last;
-    }
-
-    final tempId =
-        'temp_${DateTime.now().millisecondsSinceEpoch}_${widget.userId}';
-
-    // ✅ Show optimistic message immediately
-    final optimisticMessage = ChatMessage.pending(
-      tempId: tempId,
-      userId: widget.userId,
-      username: widget.username,
-      text: caption,
-      isVideo: true,
-      videoUrl: 'uploading...',
-      replyTo: _replyingTo,
+    final caption = await _showCaptionDialog(
+      hintText: 'Add a caption to your video...',
+      isImage: false,
     );
 
-    setState(() {
-      _insertMessageSorted(optimisticMessage);
-    });
-    _saveMessagesToAppCache();
-    _cancelReply();
-    _scrollToBottom();
+    if (caption == null) return;
 
-    // ✅ Enqueue background upload
-    final uploadId = UploadQueueService().enqueueChatVideo(
-      userId: widget.userId,
-      userName: widget.username,
-      videoBytes: videoBytes,
-      videoName: video.name,
-      thumbnailBytes: thumbnailBytes!,
-      thumbnailName: thumbnailName,
-      caption: caption.isNotEmpty ? caption : null,
-      channelId: widget.channelId,
-      fixtureId: widget.fixtureId,
-      tempId: tempId,
-      authToken: widget.authToken,
-      onSuccess: (videoUrl, thumbnailUrl) {
-        // ✅ Upload complete - send the message via WebSocket
-        _sendMediaMessageWithUrl(
-          videoUrl: videoUrl,
-          thumbnailUrl: thumbnailUrl,
-          isImage: false,
-          isVideo: true,
-          caption: caption,
-          tempId: tempId,
+    setState(() => _isUploadingMedia = true);
+
+    try {
+      final videoBytes = await video.readAsBytes();
+
+      Uint8List? thumbnailBytes;
+      String thumbnailName =
+          'thumb_${DateTime.now().millisecondsSinceEpoch}.jpg';
+
+      if (kIsWeb) {
+        // Try a real client-side frame grab first — loads the video into a
+        // hidden <video> element, seeks in, and draws to a <canvas>.
+        final webThumb = await generateWebVideoThumbnail(
+          videoBytes,
+          maxWidth: 400,
+          quality: 0.75,
         );
-      },
-    );
 
-    _currentUploadId = uploadId;
-    setState(() => _isUploadingMedia = false);
-  } catch (e) {
-    _flashError('Failed to upload video: $e');
-    setState(() => _isUploadingMedia = false);
+        if (webThumb != null) {
+          thumbnailBytes = webThumb;
+        } else {
+          // Frame grab failed (unsupported codec in this browser, etc.) —
+          // fall back to a 1x1 transparent placeholder rather than blocking
+          // the send. enqueueChatVideo/_runChatVideoUpload require *some*
+          // thumbnail bytes for the upload payload.
+          thumbnailBytes = Uint8List.fromList([
+            0x89,
+            0x50,
+            0x4E,
+            0x47,
+            0x0D,
+            0x0A,
+            0x1A,
+            0x0A,
+            0x00,
+            0x00,
+            0x00,
+            0x0D,
+            0x49,
+            0x48,
+            0x44,
+            0x52,
+            0x00,
+            0x00,
+            0x00,
+            0x01,
+            0x00,
+            0x00,
+            0x00,
+            0x01,
+            0x08,
+            0x06,
+            0x00,
+            0x00,
+            0x00,
+            0x1F,
+            0x15,
+            0xC4,
+            0x89,
+            0x00,
+            0x00,
+            0x00,
+            0x0A,
+            0x49,
+            0x44,
+            0x41,
+            0x54,
+            0x78,
+            0x9C,
+            0x63,
+            0x00,
+            0x01,
+            0x00,
+            0x00,
+            0x05,
+            0x00,
+            0x01,
+            0x0D,
+            0x0A,
+            0x2D,
+            0xB4,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x49,
+            0x45,
+            0x4E,
+            0x44,
+            0xAE,
+            0x42,
+            0x60,
+            0x82,
+          ]);
+        }
+      } else {
+        final String? thumbnailPath = await VideoThumbnail.thumbnailFile(
+          video: video.path,
+          thumbnailPath: (await getTemporaryDirectory()).path,
+          imageFormat: ImageFormat.JPEG,
+          quality: 75,
+          maxHeight: 200,
+          maxWidth: 200,
+        );
+
+        if (thumbnailPath == null) {
+          _flashError('Failed to generate thumbnail');
+          setState(() => _isUploadingMedia = false);
+          return;
+        }
+
+        thumbnailBytes = await File(thumbnailPath).readAsBytes();
+        thumbnailName = thumbnailPath.split('/').last;
+      }
+
+      final tempId =
+          'temp_${DateTime.now().millisecondsSinceEpoch}_${widget.userId}';
+
+      // ✅ Show optimistic message immediately
+      final optimisticMessage = ChatMessage.pending(
+        tempId: tempId,
+        userId: widget.userId,
+        username: widget.username,
+        text: caption,
+        isVideo: true,
+        videoUrl: 'uploading...',
+        replyTo: _replyingTo,
+      );
+
+      setState(() {
+        _insertMessageSorted(optimisticMessage);
+      });
+      _saveMessagesToAppCache();
+      _cancelReply();
+      _scrollToBottom();
+
+      // ✅ Enqueue background upload
+      final uploadId = UploadQueueService().enqueueChatVideo(
+        userId: widget.userId,
+        userName: widget.username,
+        videoBytes: videoBytes,
+        videoName: video.name,
+        thumbnailBytes: thumbnailBytes!,
+        thumbnailName: thumbnailName,
+        caption: caption.isNotEmpty ? caption : null,
+        channelId: widget.channelId,
+        fixtureId: widget.fixtureId,
+        tempId: tempId,
+        authToken: widget.authToken,
+        onSuccess: (videoUrl, thumbnailUrl) {
+          // ✅ Upload complete - send the message via WebSocket
+          _sendMediaMessageWithUrl(
+            videoUrl: videoUrl,
+            thumbnailUrl: thumbnailUrl,
+            isImage: false,
+            isVideo: true,
+            caption: caption,
+            tempId: tempId,
+          );
+        },
+      );
+
+      _currentUploadId = uploadId;
+      setState(() => _isUploadingMedia = false);
+    } catch (e) {
+      _flashError('Failed to upload video: $e');
+      setState(() => _isUploadingMedia = false);
+    }
   }
-}
+
   Future<void> _pickAndSendImage() async {
     if (_isUploadingMedia) return;
 
@@ -2974,9 +2987,9 @@ static const Duration _commentaryFetchCooldown = Duration(seconds: 20);
   // MESSAGES - WITH APPCACHE
   // ==========================================================================
 
- Future<void> _loadMessages() async {
-    final cachedMessages =
-        await AppCache.getCachedMessagesAsync(widget.channelId, widget.fixtureId);
+  Future<void> _loadMessages() async {
+    final cachedMessages = await AppCache.getCachedMessagesAsync(
+        widget.channelId, widget.fixtureId);
 
     if (cachedMessages != null && cachedMessages.isNotEmpty) {
       final messages = cachedMessages.map((msgMap) {
@@ -3038,41 +3051,44 @@ static const Duration _commentaryFetchCooldown = Duration(seconds: 20);
   // ==========================================================================
   // COMMENTARY LOADING
   // ==========================================================================
- Future<void> _loadCommentary() async {
-  if (widget.fixtureId == null) return;
-  final fixtureId = widget.fixtureId!;
+  Future<void> _loadCommentary() async {
+    if (widget.fixtureId == null) return;
+    final fixtureId = widget.fixtureId!;
 
-  final cached = AppCache.getCachedMessages(widget.channelId, widget.fixtureId);
-  final cachedCommentary =
-      cached?.where((m) => m['isCommentary'] == true).toList() ?? [];
+    final cached =
+        AppCache.getCachedMessages(widget.channelId, widget.fixtureId);
+    final cachedCommentary =
+        cached?.where((m) => m['isCommentary'] == true).toList() ?? [];
 
-  if (cachedCommentary.isNotEmpty) {
-    _hydrateCommentaryFromCache(cachedCommentary);
-  }
+    if (cachedCommentary.isNotEmpty) {
+      _hydrateCommentaryFromCache(cachedCommentary);
+    }
 
-  if (_isHistoryGame) {
-    if (cachedCommentary.isNotEmpty || AppCache.isCommentaryHydrated(fixtureId)) {
-      debugPrint('📜 History game — cache is authoritative, no refetch');
+    if (_isHistoryGame) {
+      if (cachedCommentary.isNotEmpty ||
+          AppCache.isCommentaryHydrated(fixtureId)) {
+        debugPrint('📜 History game — cache is authoritative, no refetch');
+        return;
+      }
+      AppCache.markCommentaryHydrated(fixtureId);
+      await _fetchHistoryCommentaryFromApi();
       return;
     }
-    AppCache.markCommentaryHydrated(fixtureId);
-    await _fetchHistoryCommentaryFromApi();
-    return;
+
+    // ✅ Live/upcoming: refetch if we haven't fetched recently, not just
+    // "haven't fetched this session ever". A stale permanent flag was the
+    // bug — it blocked refetches for the rest of the app's lifetime.
+    final lastFetch = _lastCommentaryFetchAt[fixtureId];
+    final isStale = lastFetch == null ||
+        DateTime.now().difference(lastFetch) > _commentaryFetchCooldown;
+
+    if (!isStale) {
+      debugPrint('⚡ Commentary fetched recently — skipping refetch');
+      return;
+    }
+    await _fetchCommentaryFromApi();
   }
 
-  // ✅ Live/upcoming: refetch if we haven't fetched recently, not just
-  // "haven't fetched this session ever". A stale permanent flag was the
-  // bug — it blocked refetches for the rest of the app's lifetime.
-  final lastFetch = _lastCommentaryFetchAt[fixtureId];
-  final isStale = lastFetch == null ||
-      DateTime.now().difference(lastFetch) > _commentaryFetchCooldown;
-
-  if (!isStale) {
-    debugPrint('⚡ Commentary fetched recently — skipping refetch');
-    return;
-  }
-  await _fetchCommentaryFromApi();
-}
   // ==========================================================================
   // Hydrate _messages with cached commentary entries (dedup by id).
   // ==========================================================================
@@ -3305,7 +3321,7 @@ static const Duration _commentaryFetchCooldown = Duration(seconds: 20);
       isImage: false,
       isVideo: false,
       channelId: widget.channelId,
-       fixtureId: widget.fixtureId ?? '',
+      fixtureId: widget.fixtureId ?? '',
       tempId: tempId,
       onReconnectAttempt: () async => _connectWebSocket(),
     );
@@ -3979,56 +3995,56 @@ static const Duration _commentaryFetchCooldown = Duration(seconds: 20);
     }
   }
 
- Future<void> _fetchCommentaryFromApi() async {
-  if (widget.fixtureId == null) return;
-  try {
-    final response = await http
-        .get(
-          Uri.parse(
-              '$_api/games/${widget.fixtureId}/commentary/latest?limit=100'),
-          headers: _headers(),
-        )
-        .timeout(const Duration(seconds: 10));
+  Future<void> _fetchCommentaryFromApi() async {
+    if (widget.fixtureId == null) return;
+    try {
+      final response = await http
+          .get(
+            Uri.parse(
+                '$_api/games/${widget.fixtureId}/commentary/latest?limit=100'),
+            headers: _headers(),
+          )
+          .timeout(const Duration(seconds: 10));
 
-    if (response.statusCode == 200 && mounted) {
-      // ✅ Record fetch time regardless of whether new entries came back —
-      // a successful fetch means the cache is now verified-fresh either
-      // way. This is what lets _loadCommentary() skip the redundant
-      // refetch on a quick close-and-reopen.
-      _lastCommentaryFetchAt[widget.fixtureId!] = DateTime.now();
+      if (response.statusCode == 200 && mounted) {
+        // ✅ Record fetch time regardless of whether new entries came back —
+        // a successful fetch means the cache is now verified-fresh either
+        // way. This is what lets _loadCommentary() skip the redundant
+        // refetch on a quick close-and-reopen.
+        _lastCommentaryFetchAt[widget.fixtureId!] = DateTime.now();
 
-      final data = json.decode(response.body);
-      final List<dynamic> raw = data['commentary'] ?? [];
+        final data = json.decode(response.body);
+        final List<dynamic> raw = data['commentary'] ?? [];
 
-      final entries = raw
-          .whereType<Map>()
-          .map((e) => ChatMessage.commentary(
-                minute: e['minute'] ?? 0,
-                text: e['text'] ?? '',
-                type: e['type'] ?? 'update',
-                createdAt: _parseCommentaryTimestamp(e['createdAt']),
-                seq: _nextSeq(),
-              ))
-          .toList();
+        final entries = raw
+            .whereType<Map>()
+            .map((e) => ChatMessage.commentary(
+                  minute: e['minute'] ?? 0,
+                  text: e['text'] ?? '',
+                  type: e['type'] ?? 'update',
+                  createdAt: _parseCommentaryTimestamp(e['createdAt']),
+                  seq: _nextSeq(),
+                ))
+            .toList();
 
-      final existingIds = _messages.map((m) => m.id).toSet();
-      final newEntries =
-          entries.where((c) => !existingIds.contains(c.id)).toList();
+        final existingIds = _messages.map((m) => m.id).toSet();
+        final newEntries =
+            entries.where((c) => !existingIds.contains(c.id)).toList();
 
-      if (newEntries.isNotEmpty) {
-        setState(() {
-          for (final entry in newEntries) {
-            _insertMessageSorted(entry);
-          }
-        });
-        _saveMessagesToAppCache();
-        _scrollToBottom();
+        if (newEntries.isNotEmpty) {
+          setState(() {
+            for (final entry in newEntries) {
+              _insertMessageSorted(entry);
+            }
+          });
+          _saveMessagesToAppCache();
+          _scrollToBottom();
+        }
       }
+    } catch (e) {
+      debugPrint('❌ Error fetching commentary: $e');
     }
-  } catch (e) {
-    debugPrint('❌ Error fetching commentary: $e');
   }
-}
 
   // ==========================================================================
   // HANDLE NEW COMMENTARY FROM WEBSOCKET (REAL-TIME)
@@ -4292,7 +4308,7 @@ static const Duration _commentaryFetchCooldown = Duration(seconds: 20);
                     height: 28,
                     decoration: BoxDecoration(
                         color: FanColors.primaryDim, shape: BoxShape.circle),
-                    child:  Icon(Icons.how_to_vote,
+                    child: Icon(Icons.how_to_vote,
                         size: 14, color: FanColors.primary)),
                 const SizedBox(width: 8),
                 Expanded(
@@ -4314,7 +4330,7 @@ static const Duration _commentaryFetchCooldown = Duration(seconds: 20);
               ],
             ),
           ),
-           Divider(height: 0.5, color: FanColors.border),
+          Divider(height: 0.5, color: FanColors.border),
           Expanded(
             child: ListView.builder(
               controller: _voterScroll,
@@ -5217,7 +5233,7 @@ static const Duration _commentaryFetchCooldown = Duration(seconds: 20);
     // ==========================================================================
     // CONNECTION ACKS
     // ==========================================================================
-   _onConnectedAck = (payload) {
+    _onConnectedAck = (payload) {
       debugPrint('✅ Server confirmed WebSocket connection');
       if (widget.fixtureId != null && !_isHistoryGame) {
         _ws.send('get.commentary', {'fixtureId': widget.fixtureId});
@@ -5237,22 +5253,21 @@ static const Duration _commentaryFetchCooldown = Duration(seconds: 20);
     };
 
     _onRoomJoined = (payload) {
-  debugPrint('🔀 Room joined ack received');
-  if (widget.fixtureId != null && !_isHistoryGame) {
-    _ws.send('get.commentary', {'fixtureId': widget.fixtureId});
-    _ws.send('get.latest.comment', {
-      'fixtureId': widget.fixtureId,
-      'channelId': widget.channelId,
-    });
+      debugPrint('🔀 Room joined ack received');
+      if (widget.fixtureId != null && !_isHistoryGame) {
+        _ws.send('get.commentary', {'fixtureId': widget.fixtureId});
+        _ws.send('get.latest.comment', {
+          'fixtureId': widget.fixtureId,
+          'channelId': widget.channelId,
+        });
 
-    // ✅ Request current minute on room join
-    _ws.send('get.minute', {
-      'fixtureId': widget.fixtureId,
-      'channelId': widget.channelId,
-    });
-  }
-};
-    
+        // ✅ Request current minute on room join
+        _ws.send('get.minute', {
+          'fixtureId': widget.fixtureId,
+          'channelId': widget.channelId,
+        });
+      }
+    };
 
     _onWsError = (payload) {
       final error = payload['message']?.toString() ?? 'Unknown error';
@@ -5321,7 +5336,7 @@ static const Duration _commentaryFetchCooldown = Duration(seconds: 20);
 
     // ==========================================================================
     // CONNECTION STATUS STREAM
-   _wsConnectionSub = _ws.connectionStatus.listen((connected) {
+    _wsConnectionSub = _ws.connectionStatus.listen((connected) {
       if (mounted) {
         setState(() => _isConnected = connected);
         if (connected) {
@@ -5350,7 +5365,6 @@ static const Duration _commentaryFetchCooldown = Duration(seconds: 20);
       }
     });
     // ==========================================================================
-   
   }
   // ==========================================================================
   // TEARDOWN WEBSOCKET
@@ -5384,41 +5398,43 @@ static const Duration _commentaryFetchCooldown = Duration(seconds: 20);
     debugPrint('🧹 WebSocket listeners cleaned up');
   }
 
- Future<void> _connectWebSocket() async {
-  if (!widget.isLoggedIn) {
-    Fluttertoast.showToast(msg: '❌ Not logged in', backgroundColor: FanColors.away);
-    return;
-  }
-
-  try {
-    await _ws.connect(
-      widget.userId,
-      widget.authToken ?? '',
-      widget.channelId,
-      widget.username,
-      fixtureId: widget.fixtureId,
-    );
-    _ws.joinChannelFixtureRoom(widget.channelId, fixtureId: widget.fixtureId);
-
-    // ✅ Always request catch-up here, unconditionally — don't depend on
-    // 'connected' or 'room.joined' firing, since the socket/room may
-    // already have been connected/joined by FixturesPage before this
-    // screen ever opened, in which case neither event re-fires.
-    if (widget.fixtureId != null && !_isHistoryGame) {
-      _ws.send('get.commentary', {'fixtureId': widget.fixtureId});
-      _ws.send('get.latest.comment', {
-        'fixtureId': widget.fixtureId,
-        'channelId': widget.channelId,
-      });
-      _ws.send('get.minute', {
-        'fixtureId': widget.fixtureId,
-        'channelId': widget.channelId,
-      });
+  Future<void> _connectWebSocket() async {
+    if (!widget.isLoggedIn) {
+      Fluttertoast.showToast(
+          msg: '❌ Not logged in', backgroundColor: FanColors.away);
+      return;
     }
-  } catch (e) {
-    _scheduleReconnect();
+
+    try {
+      await _ws.connect(
+        widget.userId,
+        widget.authToken ?? '',
+        widget.channelId,
+        widget.username,
+        fixtureId: widget.fixtureId,
+      );
+      _ws.joinChannelFixtureRoom(widget.channelId, fixtureId: widget.fixtureId);
+
+      // ✅ Always request catch-up here, unconditionally — don't depend on
+      // 'connected' or 'room.joined' firing, since the socket/room may
+      // already have been connected/joined by FixturesPage before this
+      // screen ever opened, in which case neither event re-fires.
+      if (widget.fixtureId != null && !_isHistoryGame) {
+        _ws.send('get.commentary', {'fixtureId': widget.fixtureId});
+        _ws.send('get.latest.comment', {
+          'fixtureId': widget.fixtureId,
+          'channelId': widget.channelId,
+        });
+        _ws.send('get.minute', {
+          'fixtureId': widget.fixtureId,
+          'channelId': widget.channelId,
+        });
+      }
+    } catch (e) {
+      _scheduleReconnect();
+    }
   }
-}
+
   void _scheduleReconnect() {
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(const Duration(seconds: 5), () {
@@ -5617,7 +5633,7 @@ static const Duration _commentaryFetchCooldown = Duration(seconds: 20);
         isImage: isImage,
         isVideo: isVideo,
         channelId: widget.channelId,
-         fixtureId: widget.fixtureId ?? '',
+        fixtureId: widget.fixtureId ?? '',
         tempId: tempId,
         onReconnectAttempt: () async => _connectWebSocket(),
       );
@@ -5694,50 +5710,49 @@ static const Duration _commentaryFetchCooldown = Duration(seconds: 20);
   }
 
   @override
-void dispose() {
-  _appCacheSubscription?.cancel();
-  _markChatAsRead();
+  void dispose() {
+    _appCacheSubscription?.cancel();
+    _markChatAsRead();
 
-  _teardownWebSocketListeners();
+    _teardownWebSocketListeners();
 
-  // ✅ Actually leave this fixture's room now instead of just clearing a
-  // pin — this sends room.leave to the server so it stops forwarding
-  // this fixture's chat/commentary/vote broadcasts to our connection,
-  // without touching any other rooms (e.g. FixturesPage's live-fixture
-  // rooms) that share the same underlying socket.
-  _ws.leaveChannelFixtureRoom(widget.channelId, fixtureId: widget.fixtureId);
+    // ✅ Actually leave this fixture's room now instead of just clearing a
+    // pin — this sends room.leave to the server so it stops forwarding
+    // this fixture's chat/commentary/vote broadcasts to our connection,
+    // without touching any other rooms (e.g. FixturesPage's live-fixture
+    // rooms) that share the same underlying socket.
+    _ws.leaveChannelFixtureRoom(widget.channelId, fixtureId: widget.fixtureId);
 
-  _stopCarouselAutoScroll();
-  _carouselTimer?.cancel();
-  _carouselController.dispose();
-  _typingTimer?.cancel();
-  _reconnectTimer?.cancel();
-  _scrollToBottomTimer?.cancel();
-  _focusNode.dispose();
-  _messageCtrl.dispose();
-  _chatScroll.dispose();
-  _latestLiveHighlightTimer?.cancel();
-  _voterScroll.dispose();
-
-  WidgetsBinding.instance.removeObserver(this);
-  super.dispose();
-}
-
-
- @override
-void didChangeAppLifecycleState(AppLifecycleState state) {
-  if (state == AppLifecycleState.resumed) {
-    _reconnectIfNeeded();
-    if (widget.fixtureId != null && !_isHistoryGame) {
-      _fetchCommentaryFromApi(); // ✅ catch up on anything missed while backgrounded
-    }
-    if (_carouselItems.length > 1 && !_isCarouselRunning) {
-      _startCarouselAutoScroll();
-    }
-  } else if (state == AppLifecycleState.paused) {
     _stopCarouselAutoScroll();
+    _carouselTimer?.cancel();
+    _carouselController.dispose();
+    _typingTimer?.cancel();
+    _reconnectTimer?.cancel();
+    _scrollToBottomTimer?.cancel();
+    _focusNode.dispose();
+    _messageCtrl.dispose();
+    _chatScroll.dispose();
+    _latestLiveHighlightTimer?.cancel();
+    _voterScroll.dispose();
+
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
-}
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _reconnectIfNeeded();
+      if (widget.fixtureId != null && !_isHistoryGame) {
+        _fetchCommentaryFromApi(); // ✅ catch up on anything missed while backgrounded
+      }
+      if (_carouselItems.length > 1 && !_isCarouselRunning) {
+        _startCarouselAutoScroll();
+      }
+    } else if (state == AppLifecycleState.paused) {
+      _stopCarouselAutoScroll();
+    }
+  }
 
   // ==========================================================================
   // BUILD - PITCH LIGHT
