@@ -203,178 +203,182 @@ class _VideoPostWidgetState extends State<_VideoPostWidget> {
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    if (!_isInitialized || _aspectRatio == null) {
-      // ✅ Show thumbnail while loading if available
-      if (widget.thumbnailUrl != null && widget.thumbnailUrl!.isNotEmpty) {
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(10),
-          child: SizedBox(
-            width: widget.maxWidth,
-            height: widget.maxHeight * 0.6,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                CachedNetworkImage(
-                  imageUrl: widget.thumbnailUrl!,
-                  fit: BoxFit.cover,
-                  placeholder: (context, _) => Container(
-                    color: FanColors.surface,
-                    child: Center(
-                      child: SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: FanColors.primary,
-                        ),
-                      ),
-                    ),
-                  ),
-                  errorWidget: (context, url, error) => Container(
-                    color: FanColors.surface,
-                    child: Center(
-                      child: Icon(
-                        Icons.videocam,
-                        size: 36,
-                        color: FanColors.textTertiary,
-                      ),
-                    ),
-                  ),
-                ),
-                // ✅ Play button overlay
-                Positioned.fill(
-                  child: Center(
-                    child: Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.5),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.play_arrow,
-                        color: Colors.white,
-                        size: 32,
-                      ),
-                    ),
-                  ),
-                ),
-                // ✅ Video badge
-                Positioned(
-                  bottom: 8,
-                  left: 8,
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.6),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.videocam, color: Colors.white, size: 10),
-                        const SizedBox(width: 3),
-                        Text(
-                          'Video',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 8,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      }
-
-      // Fallback loading state
+ @override
+Widget build(BuildContext context) {
+  if (!_isInitialized || _aspectRatio == null) {
+    // ✅ Show thumbnail while loading if available
+    if (widget.thumbnailUrl != null && widget.thumbnailUrl!.isNotEmpty) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(10),
-        child: Container(
+        child: SizedBox(
           width: widget.maxWidth,
           height: widget.maxHeight * 0.6,
-          color: FanColors.surface,
-          child: Center(
-            child: SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: FanColors.primary,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              CachedNetworkImage(
+                imageUrl: widget.thumbnailUrl!,
+                fit: BoxFit.cover,
+                placeholder: (context, _) => Container(
+                  color: FanColors.surface,
+                  child: Center(
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: FanColors.primary,
+                      ),
+                    ),
+                  ),
+                ),
+                errorWidget: (context, url, error) => Container(
+                  color: FanColors.surface,
+                  child: Center(
+                    child: Icon(
+                      Icons.videocam,
+                      size: 36,
+                      color: FanColors.textTertiary,
+                    ),
+                  ),
+                ),
               ),
-            ),
+              Positioned.fill(
+                child: Center(
+                  child: Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.5),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.play_arrow,
+                      color: Colors.white,
+                      size: 32,
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                bottom: 8,
+                left: 8,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.6),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.videocam, color: Colors.white, size: 10),
+                      const SizedBox(width: 3),
+                      Text(
+                        'Video',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 8,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       );
     }
 
-    // Fit within the box, preserving ratio
-    double width = widget.maxWidth;
-    double height = width / _aspectRatio!;
-
-    if (height > widget.maxHeight) {
-      height = widget.maxHeight;
-      width = height * _aspectRatio!;
-    }
-
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          if (_controller.value.isPlaying) {
-            _controller.pause();
-            _isPlaying = false;
-          } else {
-            _controller.play();
-            _isPlaying = true;
-          }
-        });
-      },
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(10),
-        child: SizedBox(
-          width: width,
-          height: height,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              // Video player
-              VideoPlayer(_controller),
-              // Pause indicator
-              if (!_controller.value.isPlaying && _isInitialized)
-                Positioned(
-                  bottom: 8,
-                  right: 8,
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.5),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      'Paused',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ),
-            ],
+    // Fallback loading state
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        width: widget.maxWidth,
+        height: widget.maxHeight * 0.6,
+        color: FanColors.surface,
+        child: Center(
+          child: SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: FanColors.primary,
+            ),
           ),
         ),
       ),
     );
   }
+
+  // ✅ Same fix as _SmartPostImage: width always fills the available
+  // space, height is capped, and overflow is cropped via BoxFit.cover
+  // (through a FittedBox, since VideoPlayer has no native `fit` param)
+  // instead of shrinking the whole box down to a narrower width.
+  final double width = widget.maxWidth;
+  double height = width / _aspectRatio!;
+  if (height > widget.maxHeight) {
+    height = widget.maxHeight;
+  }
+
+  return GestureDetector(
+    onTap: () {
+      setState(() {
+        if (_controller.value.isPlaying) {
+          _controller.pause();
+          _isPlaying = false;
+        } else {
+          _controller.play();
+          _isPlaying = true;
+        }
+      });
+    },
+    child: ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: SizedBox(
+        width: width,
+        height: height,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            FittedBox(
+              fit: BoxFit.cover,
+              child: SizedBox(
+                width: _controller.value.size.width,
+                height: _controller.value.size.height,
+                child: VideoPlayer(_controller),
+              ),
+            ),
+            if (!_controller.value.isPlaying && _isInitialized)
+              Positioned(
+                bottom: 8,
+                right: 8,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    'Paused',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
 }
 
 // ==========================================================================
@@ -449,7 +453,7 @@ class _SmartPostImageState extends State<_SmartPostImage> {
     super.dispose();
   }
 
-  @override
+ @override
   Widget build(BuildContext context) {
     if (_aspectRatio == null) {
       return ClipRRect(
@@ -472,12 +476,13 @@ class _SmartPostImageState extends State<_SmartPostImage> {
       );
     }
 
-    double width = widget.maxWidth;
+    // ✅ Always fill the available width. Only the height is capped —
+    // tall media gets center-cropped (BoxFit.cover) instead of shrinking
+    // the whole box down to a narrower width.
+    final double width = widget.maxWidth;
     double height = width / _aspectRatio!;
-
     if (height > widget.maxHeight) {
       height = widget.maxHeight;
-      width = height * _aspectRatio!;
     }
 
     return ClipRRect(
@@ -491,6 +496,19 @@ class _SmartPostImageState extends State<_SmartPostImage> {
           height: height,
           fit: BoxFit.cover,
           filterQuality: FilterQuality.high,
+          placeholder: (context, _) => Container(
+            color: FanColors.surface,
+            child: Center(
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: FanColors.primary,
+                ),
+              ),
+            ),
+          ),
           errorWidget: (context, url, error) => Container(
             width: width,
             height: height,
