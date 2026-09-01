@@ -63,28 +63,28 @@ class _WebNativeAdCardState extends State<WebNativeAdCard> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _pushAd());
   }
 
-  void _pushAd() {
-    if (_pushed || !mounted) return;
-    _pushed = true;
-    try {
-      final win = web.window as JSObject;
-      if (win['adsbygoogle'] == null) {
-        win['adsbygoogle'] = JSArray();
-      }
-      final adsbygoogle = win['adsbygoogle'] as JSObject;
-      adsbygoogle.callMethod('push'.toJS, JSObject());
-
-      // ✅ AdSense sets data-ad-status async, usually within ~1s. Poll a
-      // few times before giving up and treating it as unfilled — avoids
-      // both a too-early false negative and hanging forever if it never
-      // resolves (e.g. adblock intercepted the fill call silently).
-      _pollFillStatus(attempt: 0);
-    } catch (e) {
-      debugPrint('❌ AdSense push failed for slot $_slotId: $e');
-      if (mounted) setState(() => _checkedFill = true); // treat as unfilled
+ void _pushAd() {
+  if (_pushed || !mounted) return;
+  _pushed = true;
+  try {
+    final win = web.window as JSObject;
+    if (win['adsbygoogle'] == null) {
+      win['adsbygoogle'] = JSArray();
     }
+    final adsbygoogle = win['adsbygoogle'] as JSObject;
+    adsbygoogle.callMethod('push'.toJS, JSObject());
+  } catch (e) {
+    // ✅ "All 'ins' elements ... already have ads in them" is not a real
+    // failure — it means an earlier push() from a sibling ad card already
+    // swept the DOM and may have filled THIS element too, since push({})
+    // isn't scoped to a specific <ins>. Don't short-circuit to "unfilled"
+    // here; just log and fall through to the normal data-ad-status poll,
+    // which will correctly report filled/unfilled either way.
+    debugPrint('⚠️ AdSense push for slot $_slotId: $e (checking fill status anyway)');
   }
-
+  // Always poll — regardless of whether push() threw.
+  _pollFillStatus(attempt: 0);
+}
   void _pollFillStatus({required int attempt}) {
     const maxAttempts = 10;
     const interval = Duration(milliseconds: 300);
