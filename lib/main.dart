@@ -34,8 +34,55 @@ import './pages/fan_Funzy_design.dart';
 import 'models/user_channel.dart';
 import 'dart:js_interop';
 
-@JS('onFunspotAppReady')
+// ============================================================================
+// ISOLATE WORKER FOR HEAVY JSON OPERATIONS
+// ============================================================================
+import 'package:flutter/foundation.dart' show compute;
+// Web interop - may be defined by index.html
+@JS()
 external void onFunspotAppReady();
+
+/// Heavy JSON operations run in a separate isolate to avoid jank
+class JsonWorker {
+  static Future<String> encodeToJson(dynamic data) async {
+    if (kDebugMode) {
+      developer.log('🧵 Encoding to JSON in isolate', name: 'JsonWorker');
+    }
+    return await compute(_encodeJson, data);
+  }
+
+  static String _encodeJson(dynamic data) {
+    return json.encode(data);
+  }
+
+  static Future<dynamic> decodeFromJson(String data) async {
+    if (kDebugMode) {
+      developer.log('🧵 Decoding JSON in isolate', name: 'JsonWorker');
+    }
+    return await compute(_decodeJson, data);
+  }
+
+  static dynamic _decodeJson(String data) {
+    return json.decode(data);
+  }
+
+  static Future<String> encodeMap(Map<String, dynamic> data) async {
+    return await compute(_encodeMap, data);
+  }
+
+  static String _encodeMap(Map<String, dynamic> data) {
+    return json.encode(data);
+  }
+
+  static Future<Map<String, dynamic>> decodeMap(String data) async {
+    final result = await compute(_decodeMap, data);
+    return result as Map<String, dynamic>;
+  }
+
+  static dynamic _decodeMap(String data) {
+    return json.decode(data);
+  }
+}
 
 // ============================================================================
 // GLOBAL KEYS
@@ -50,8 +97,10 @@ bool _isLoginModalOpen = false;
 Timer? _appCacheRefreshTimer;
 
 // ============================================================================
-// APPCACHE - Enhanced with memory management
+// APPCACHE - ENHANCED WITH PERFORMANCE OPTIMIZATIONS
 // ============================================================================
+
+/// DiskWriteScheduler - Debounces disk writes to prevent excessive I/O
 class DiskWriteScheduler {
   static final Map<String, Timer> _timers = {};
   static final Map<String, Future<void> Function()> _writers = {};
@@ -84,9 +133,21 @@ class DiskWriteScheduler {
         .whereType<Future<void> Function()>();
     await Future.wait(writers.map((w) => w()));
   }
+
+  static bool hasPendingWrites() => _writers.isNotEmpty;
 }
 
+/// AppCache - Optimized caching with proper memory management
 class AppCache {
+  // ==========================================================================
+  // CONFIGURATION
+  // ==========================================================================
+  static const int _maxMessagesPerFixture = 50;
+  static const int _maxHistoryGames = 50;
+  static const int _maxLiveEvents = 20;
+  static const int _maxCachedFixtures = 20;
+  static const int _maxCommentsPerFixture = 100;
+
   // ==========================================================================
   // VOTE STREAM
   // ==========================================================================
@@ -97,7 +158,7 @@ class AppCache {
   static final Map<String, String> _commentPostMap = {};
 
   // ==========================================================================
-  // HISTORY COMMENTS CACHE - FIXED
+  // HISTORY COMMENTS CACHE
   // ==========================================================================
   static final Map<String, List<Map<String, dynamic>>> _historyComments = {};
   static bool _historyCommentsLoaded = false;
@@ -120,11 +181,8 @@ class AppCache {
   }
 
   // ==========================================================================
-// SESSION HYDRATION - tracks which fixtures have had ONE network catch-up
-// this app process. Never cleared while the app is alive, so re-entering
-// ChatScreen mid-session is pure AppCache + WebSocket, no refetch. Only a
-// real app kill/relaunch resets these (new process = fresh static state).
-// ==========================================================================
+  // SESSION HYDRATION
+  // ==========================================================================
   static final Set<String> _hydratedMessageKeys = {};
   static final Set<String> _hydratedCommentaryKeys = {};
 
@@ -165,14 +223,16 @@ class AppCache {
   // ==========================================================================
   // HISTORY COMMENTS - CACHE METHODS
   // ==========================================================================
-    static void cacheHistoryComments(
+  static void cacheHistoryComments(
       String fixtureId, List<Map<String, dynamic>> comments) {
-    _historyComments[fixtureId] = comments;
+    // Trim to max
+    final trimmed = comments.take(_maxCommentsPerFixture).toList();
+    _historyComments[fixtureId] = trimmed;
     _historyCommentFetchTime[fixtureId] = DateTime.now();
 
-    // Also mirror into the main message cache for cross-screen consistency.
+    // Mirror to message cache
     final key = 'history_$fixtureId';
-    _cachedMessages[key] = comments
+    _cachedMessages[key] = trimmed
         .map((c) => {
               'id': c['id'] ??
                   'comment_${DateTime.now().millisecondsSinceEpoch}_${c['timestamp'] ?? DateTime.now().millisecondsSinceEpoch}',
@@ -189,28 +249,20 @@ class AppCache {
             })
         .toList();
 
-    // ✅ CHANGED — was two immediate, unawaited full-map JSON encodes back
-    // to back on every call. Debounced under distinct keys so a burst of
-    // calls in the same window collapses to one write each.
     DiskWriteScheduler.schedule(
         'history_comments_disk', _saveHistoryCommentsToDisk);
     DiskWriteScheduler.schedule('cached_messages_disk', _saveMessagesToDisk);
-
-    if (kDebugMode) {
-      developer.log(
-          '💾 Cached ${comments.length} comments for history fixture $fixtureId',
-          name: 'AppCache');
-    }
   }
 
-   static void addHistoryComment(
+  static void addHistoryComment(
       String fixtureId, Map<String, dynamic> comment) {
     final existing = _historyComments[fixtureId] ?? [];
     final exists = existing.any((c) =>
         c['text'] == comment['text'] && c['timestamp'] == comment['timestamp']);
     if (exists) return;
 
-    final updated = [comment, ...existing]; // newest first
+    final updated =
+        [comment, ...existing].take(_maxCommentsPerFixture).toList();
     _historyComments[fixtureId] = updated;
     _historyCommentFetchTime[fixtureId] = DateTime.now();
 
@@ -228,26 +280,25 @@ class AppCache {
       'commentaryType': comment['type'] ?? 'update',
       'minute': comment['minute'] ?? 0,
     };
-    _cachedMessages[key] = [msgEntry, ...(_cachedMessages[key] ?? [])];
+    final existingMessages = _cachedMessages[key] ?? [];
+    _cachedMessages[key] =
+        [msgEntry, ...existingMessages].take(_maxMessagesPerFixture).toList();
 
-    // ✅ CHANGED — a live match can call this several times a minute purely
-    // from commentary ticks. Debounced, same reasoning as above.
     DiskWriteScheduler.schedule(
         'history_comments_disk', _saveHistoryCommentsToDisk);
     DiskWriteScheduler.schedule('cached_messages_disk', _saveMessagesToDisk);
   }
 
- 
-
   static Future<void> _saveHistoryCommentsToDisk() async {
     try {
+      final data = {
+        'comments': _historyComments,
+        'timestamps': _historyCommentFetchTime
+            .map((k, v) => MapEntry(k, v.toIso8601String())),
+      };
+      final encoded = await JsonWorker.encodeToJson(data);
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(
-          'history_comments_cache', json.encode(_historyComments));
-      await prefs.setString(
-          'history_comments_timestamps',
-          json.encode(_historyCommentFetchTime
-              .map((k, v) => MapEntry(k, v.toIso8601String()))));
+      await prefs.setString('history_comments_cache', encoded);
     } catch (e) {
       developer.log('⚠️ Failed to save history comments: $e', name: 'AppCache');
     }
@@ -262,24 +313,24 @@ class AppCache {
         final prefs = await SharedPreferences.getInstance();
         final data = prefs.getString('history_comments_cache');
         if (data != null) {
-          final Map<String, dynamic> decoded = jsonDecode(data);
-          for (var entry in decoded.entries) {
-            _historyComments[entry.key] =
-                List<Map<String, dynamic>>.from(entry.value);
+          final decoded = await JsonWorker.decodeMap(data);
+          final comments = decoded['comments'] as Map<String, dynamic>?;
+          if (comments != null) {
+            for (var entry in comments.entries) {
+              _historyComments[entry.key] =
+                  List<Map<String, dynamic>>.from(entry.value);
+            }
+          }
+          final timestamps = decoded['timestamps'] as Map<String, String>?;
+          if (timestamps != null) {
+            for (var entry in timestamps.entries) {
+              _historyCommentFetchTime[entry.key] = DateTime.parse(entry.value);
+            }
           }
           if (kDebugMode) {
             developer.log(
                 '📦 Lazy loaded ${_historyComments.length} history comment sets',
                 name: 'AppCache');
-          }
-        }
-
-        // Load timestamps
-        final tsData = prefs.getString('history_comments_timestamps');
-        if (tsData != null) {
-          final Map<String, dynamic> decoded = jsonDecode(tsData);
-          for (var entry in decoded.entries) {
-            _historyCommentFetchTime[entry.key] = DateTime.parse(entry.value);
           }
         }
       } catch (e) {
@@ -290,7 +341,7 @@ class AppCache {
   }
 
   // ==========================================================================
-  // REFRESH HISTORY GAMES WITH COMMENTS - FIXED
+  // REFRESH HISTORY GAMES WITH COMMENTS
   // ==========================================================================
   static Future<void> refreshHistoryGamesWithComments(
       {String? authToken}) async {
@@ -325,12 +376,13 @@ class AppCache {
 
         historyGames = gamesData
             .map((g) => HistoryGame.fromJson(g as Map<String, dynamic>))
+            .take(_maxHistoryGames)
             .toList();
 
         await _saveHistoryGamesToDisk(historyGames);
         _historyController.add(historyGames);
 
-        // Preload comments for the first 5 games
+        // Preload comments for first 5 games
         final gamesToCache = historyGames.take(5).toList();
         for (var game in gamesToCache) {
           if (!_historyComments.containsKey(game.id)) {
@@ -398,6 +450,7 @@ class AppCache {
                         'comment_${DateTime.now().millisecondsSinceEpoch}_$fixtureId',
                     'username': 'Live Commentary',
                   })
+              .take(_maxCommentsPerFixture)
               .toList();
 
           if (comments.isNotEmpty) {
@@ -473,11 +526,12 @@ class AppCache {
       _lastCommentLoad[postId];
 
   static void cacheComments(String postId, List<Comment> comments) {
-    _postComments[postId] = comments;
+    final trimmed = comments.take(_maxCommentsPerFixture).toList();
+    _postComments[postId] = trimmed;
     _lastCommentLoad[postId] = DateTime.now();
     _savePostCommentsToDisk();
     if (kDebugMode) {
-      developer.log('💾 Cached ${comments.length} comments for post $postId',
+      developer.log('💾 Cached ${trimmed.length} comments for post $postId',
           name: 'AppCache');
     }
   }
@@ -485,7 +539,7 @@ class AppCache {
   static void addCommentToCache(String postId, Comment comment) {
     final existing = List<Comment>.from(_postComments[postId] ?? []);
     existing.insert(0, comment);
-    _postComments[postId] = existing;
+    _postComments[postId] = existing.take(_maxCommentsPerFixture).toList();
     _lastCommentLoad[postId] = DateTime.now();
     _savePostCommentsToDisk();
   }
@@ -503,9 +557,10 @@ class AppCache {
 
     final parent = existing[parentIndex];
     final replies = List<Comment>.from(parent.replies ?? [])..insert(0, reply);
+    final trimmedReplies = replies.take(_maxCommentsPerFixture).toList();
 
     existing[parentIndex] = parent.copyWith(
-      replies: replies,
+      replies: trimmedReplies,
       replyCount: parent.replyCount + 1,
     );
     _postComments[postId] = existing;
@@ -513,28 +568,31 @@ class AppCache {
   }
 
   // ==========================================================================
-  // SAVE TO DISK - PERSISTENT STORAGE
+  // SAVE TO DISK - OPTIMIZED WITH ISOLATE
   // ==========================================================================
   static Future<void> saveToDisk() async {
     try {
       final prefs = await SharedPreferences.getInstance();
 
-      // Save fixtures
-      final fixturesJson = fixtures.map((f) => f.toJson()).toList();
-      await prefs.setString('fixtures_cache', jsonEncode(fixturesJson));
-      await prefs.setInt(
-          'fixtures_timestamp', DateTime.now().millisecondsSinceEpoch ~/ 1000);
+      // Batch all data into one map for single encode
+      final data = <String, dynamic>{};
+
+      // Save fixtures (trimmed)
+      final fixturesJson =
+          fixtures.take(_maxCachedFixtures).map((f) => f.toJson()).toList();
+      data['fixtures_cache'] = fixturesJson;
+      data['fixtures_timestamp'] =
+          DateTime.now().millisecondsSinceEpoch ~/ 1000;
 
       // Save user votes
-      await prefs.setString('cached_user_votes', jsonEncode(userVotes));
+      data['cached_user_votes'] = userVotes;
 
       // Save channels
-      final channelsJson = channels.map((c) => c.toJson()).toList();
-      await prefs.setString('cached_channels', jsonEncode(channelsJson));
+      data['cached_channels'] = channels.map((c) => c.toJson()).toList();
 
       // Save profile
       if (profile != null) {
-        await prefs.setString('cached_profile', jsonEncode(profile));
+        data['cached_profile'] = profile;
       }
 
       // Save channel fixtures
@@ -557,26 +615,15 @@ class AppCache {
           'unreadCounts': entry.value.unreadCounts,
         };
       }
-      await prefs.setString(
-          'channel_fixtures_cache', jsonEncode(channelFixturesJson));
+      data['channel_fixtures_cache'] = channelFixturesJson;
 
       // Save vote counts
-      await prefs.setString('vote_counts_cache', jsonEncode(_voteCounts));
-
-      // Save comment counts
-      await prefs.setString('comment_counts_cache', jsonEncode(_commentCounts));
-
-      // Save like counts
-      await prefs.setString('like_counts_cache', jsonEncode(_likeCounts));
-
-      // Save pledge counts
-      await prefs.setString('pledge_counts_cache', jsonEncode(_pledgeCounts));
-
-      // Save bet counts
-      await prefs.setString('bet_counts_cache', jsonEncode(_betCounts));
-
-      // Save unread counts
-      await prefs.setString('unread_counts_cache', jsonEncode(_unreadCounts));
+      data['vote_counts_cache'] = _voteCounts;
+      data['comment_counts_cache'] = _commentCounts;
+      data['like_counts_cache'] = _likeCounts;
+      data['pledge_counts_cache'] = _pledgeCounts;
+      data['bet_counts_cache'] = _betCounts;
+      data['unread_counts_cache'] = _unreadCounts;
 
       // Save latest comments
       final latestCommentsJson = <String, dynamic>{};
@@ -587,17 +634,21 @@ class AppCache {
           'timestamp': _latestCommentTimestamps[entry.key]?.toIso8601String(),
         };
       }
-      await prefs.setString(
-          'latest_comments_cache', jsonEncode(latestCommentsJson));
+      data['latest_comments_cache'] = latestCommentsJson;
 
-      // Save messages
-      await prefs.setString('cached_messages', jsonEncode(_cachedMessages));
+      // Save messages (trimmed)
+      final trimmedMessages = <String, dynamic>{};
+      for (var entry in _cachedMessages.entries) {
+        trimmedMessages[entry.key] =
+            entry.value.take(_maxMessagesPerFixture).toList();
+      }
+      data['cached_messages'] = trimmedMessages;
 
       // Save comrades
-      await prefs.setString('cached_comrades', jsonEncode(comrades));
+      data['cached_comrades'] = comrades;
 
       // Save user comrades
-      await prefs.setStringList('cached_user_comrades', userComrades.toList());
+      data['cached_user_comrades'] = userComrades.toList();
 
       // Save comrade voters
       final comradeVotersJson = <String, List<Map<String, dynamic>>>{};
@@ -605,57 +656,69 @@ class AppCache {
         comradeVotersJson[entry.key] =
             entry.value.map((c) => c.toJson()).toList();
       }
-      await prefs.setString(
-          'cached_comrade_voters', jsonEncode(comradeVotersJson));
+      data['cached_comrade_voters'] = comradeVotersJson;
 
       // Save per-channel vote counts
-      await prefs.setString(
-          'per_channel_vote_counts', jsonEncode(perChannelVoteCounts));
+      data['per_channel_vote_counts'] = perChannelVoteCounts;
 
       // Save history games
-      final historyGamesJson = historyGames.map((g) => g.toJson()).toList();
-      await prefs.setString(
-          'history_games_cache', jsonEncode(historyGamesJson));
+      data['history_games_cache'] =
+          historyGames.map((g) => g.toJson()).toList();
 
       // Save aftermatch data
       final aftermatchJson = <String, dynamic>{};
       for (var entry in _aftermatchData.entries) {
         aftermatchJson[entry.key] = entry.value.toJson();
       }
-      await prefs.setString(
-          'aftermatch_data_cache', jsonEncode(aftermatchJson));
+      data['aftermatch_data_cache'] = aftermatchJson;
 
       // Save live events
-      await prefs.setString('live_events_cache', jsonEncode(_liveEvents));
+      data['live_events_cache'] = _liveEvents;
 
       // Save voters list
-      await prefs.setString('voters_cache', jsonEncode(_votersList));
+      data['voters_cache'] = _votersList;
 
-      // Save history comments
+      // Encode all data in isolate
+      final encoded = await JsonWorker.encodeToJson(data);
+      await prefs.setString('app_cache_data', encoded);
+
+      // Save history comments separately (already optimized)
       await _saveHistoryCommentsToDisk();
 
-      debugPrint('💾 AppCache: All data saved to disk successfully');
+      if (kDebugMode) {
+        developer.log('💾 AppCache: All data saved to disk successfully',
+            name: 'AppCache');
+      }
     } catch (e) {
-      debugPrint('❌ AppCache: Error saving to disk: $e');
+      developer.log('❌ AppCache: Error saving to disk: $e', name: 'AppCache');
     }
   }
 
   // ==========================================================================
-  // LOAD FIXTURES FROM CACHE
+  // LOAD FIXTURES FROM CACHE - OPTIMIZED
   // ==========================================================================
   static Future<List<Fixture>?> loadFixturesFromCache() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final fixturesJson = prefs.getString('fixtures_cache');
+      final data = prefs.getString('app_cache_data');
+
+      if (data == null) {
+        debugPrint('📭 No app cache data found');
+        return null;
+      }
+
+      final decoded = await JsonWorker.decodeMap(data);
+      final fixturesJson = decoded['fixtures_cache'] as List<dynamic>?;
 
       if (fixturesJson == null) {
         debugPrint('📭 No fixtures cache found');
         return null;
       }
 
-      final List<dynamic> data = jsonDecode(fixturesJson);
-      final List<Fixture> loadedFixtures =
-          data.map((f) => Fixture.fromJson(f as Map<String, dynamic>)).toList();
+      final List<Fixture> loadedFixtures = fixturesJson
+          .map((f) => Fixture.fromJson(f as Map<String, dynamic>))
+          .where((f) => f.status != 'completed' && f.status != 'finished')
+          .toList();
 
       debugPrint('📦 Loaded ${loadedFixtures.length} fixtures from disk cache');
       return loadedFixtures;
@@ -666,51 +729,59 @@ class AppCache {
   }
 
   // ==========================================================================
-  // LOAD ALL DATA FROM DISK
+  // LOAD ALL DATA FROM DISK - OPTIMIZED
   // ==========================================================================
   static Future<void> loadAllFromDisk() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      final data = prefs.getString('app_cache_data');
 
-      // Load fixtures
-      final fixturesJson = prefs.getString('fixtures_cache');
+      if (data == null) {
+        debugPrint('📭 No app cache data found');
+        return;
+      }
+
+      final decoded = await JsonWorker.decodeMap(data);
+
+      // Load fixtures (trimmed)
+      final fixturesJson = decoded['fixtures_cache'] as List<dynamic>?;
       if (fixturesJson != null) {
-        final List<dynamic> data = jsonDecode(fixturesJson);
-        fixtures = data
+        fixtures = fixturesJson
             .map((f) => Fixture.fromJson(f as Map<String, dynamic>))
+            .where((f) => f.status != 'completed' && f.status != 'finished')
+            .take(_maxCachedFixtures)
             .toList();
         debugPrint('📦 Loaded ${fixtures.length} fixtures from disk');
       }
 
       // Load user votes
-      final votesJson = prefs.getString('cached_user_votes');
+      final votesJson = decoded['cached_user_votes'] as Map<String, dynamic>?;
       if (votesJson != null) {
-        userVotes = Map<String, String>.from(jsonDecode(votesJson));
+        userVotes = Map<String, String>.from(votesJson);
         debugPrint('📦 Loaded ${userVotes.length} user votes from disk');
       }
 
       // Load channels
-      final channelsJson = prefs.getString('cached_channels');
+      final channelsJson = decoded['cached_channels'] as List<dynamic>?;
       if (channelsJson != null) {
-        final List<dynamic> data = jsonDecode(channelsJson);
-        channels = data
+        channels = channelsJson
             .map((c) => UserChannel.fromJson(c as Map<String, dynamic>))
             .toList();
         debugPrint('📦 Loaded ${channels.length} channels from disk');
       }
 
       // Load profile
-      final profileJson = prefs.getString('cached_profile');
+      final profileJson = decoded['cached_profile'] as Map<String, dynamic>?;
       if (profileJson != null) {
-        profile = jsonDecode(profileJson);
+        profile = profileJson;
         debugPrint('📦 Loaded profile from disk');
       }
 
       // Load channel fixtures
-      final channelFixturesJson = prefs.getString('channel_fixtures_cache');
+      final channelFixturesJson =
+          decoded['channel_fixtures_cache'] as Map<String, dynamic>?;
       if (channelFixturesJson != null) {
-        final Map<String, dynamic> data = jsonDecode(channelFixturesJson);
-        for (var entry in data.entries) {
+        for (var entry in channelFixturesJson.entries) {
           final Map<String, dynamic> value = entry.value;
           channelFixtures[entry.key] = ChannelFixtureData(
             fixtureId: value['fixtureId'] ?? '',
@@ -737,64 +808,64 @@ class AppCache {
       }
 
       // Load vote counts
-      final voteCountsJson = prefs.getString('vote_counts_cache');
+      final voteCountsJson =
+          decoded['vote_counts_cache'] as Map<String, dynamic>?;
       if (voteCountsJson != null) {
-        final Map<String, dynamic> data = jsonDecode(voteCountsJson);
-        for (var entry in data.entries) {
+        for (var entry in voteCountsJson.entries) {
           _voteCounts[entry.key] = entry.value as int;
         }
       }
 
       // Load comment counts
-      final commentCountsJson = prefs.getString('comment_counts_cache');
+      final commentCountsJson =
+          decoded['comment_counts_cache'] as Map<String, dynamic>?;
       if (commentCountsJson != null) {
-        final Map<String, dynamic> data = jsonDecode(commentCountsJson);
-        for (var entry in data.entries) {
+        for (var entry in commentCountsJson.entries) {
           _commentCounts[entry.key] = entry.value as int;
         }
       }
 
       // Load like counts
-      final likeCountsJson = prefs.getString('like_counts_cache');
+      final likeCountsJson =
+          decoded['like_counts_cache'] as Map<String, dynamic>?;
       if (likeCountsJson != null) {
-        final Map<String, dynamic> data = jsonDecode(likeCountsJson);
-        for (var entry in data.entries) {
+        for (var entry in likeCountsJson.entries) {
           _likeCounts[entry.key] = entry.value as int;
         }
       }
 
       // Load pledge counts
-      final pledgeCountsJson = prefs.getString('pledge_counts_cache');
+      final pledgeCountsJson =
+          decoded['pledge_counts_cache'] as Map<String, dynamic>?;
       if (pledgeCountsJson != null) {
-        final Map<String, dynamic> data = jsonDecode(pledgeCountsJson);
-        for (var entry in data.entries) {
+        for (var entry in pledgeCountsJson.entries) {
           _pledgeCounts[entry.key] = entry.value as int;
         }
       }
 
       // Load bet counts
-      final betCountsJson = prefs.getString('bet_counts_cache');
+      final betCountsJson =
+          decoded['bet_counts_cache'] as Map<String, dynamic>?;
       if (betCountsJson != null) {
-        final Map<String, dynamic> data = jsonDecode(betCountsJson);
-        for (var entry in data.entries) {
+        for (var entry in betCountsJson.entries) {
           _betCounts[entry.key] = entry.value as int;
         }
       }
 
       // Load unread counts
-      final unreadCountsJson = prefs.getString('unread_counts_cache');
+      final unreadCountsJson =
+          decoded['unread_counts_cache'] as Map<String, dynamic>?;
       if (unreadCountsJson != null) {
-        final Map<String, dynamic> data = jsonDecode(unreadCountsJson);
-        for (var entry in data.entries) {
+        for (var entry in unreadCountsJson.entries) {
           _unreadCounts[entry.key] = entry.value as int;
         }
       }
 
       // Load latest comments
-      final latestCommentsJson = prefs.getString('latest_comments_cache');
+      final latestCommentsJson =
+          decoded['latest_comments_cache'] as Map<String, dynamic>?;
       if (latestCommentsJson != null) {
-        final Map<String, dynamic> data = jsonDecode(latestCommentsJson);
-        for (var entry in data.entries) {
+        for (var entry in latestCommentsJson.entries) {
           final Map<String, dynamic> value = entry.value;
           _latestComments[entry.key] = value['comment'] as String?;
           _latestCommentAuthors[entry.key] = value['author'] as String?;
@@ -806,32 +877,32 @@ class AppCache {
       }
 
       // Load messages
-      final messagesJson = prefs.getString('cached_messages');
+      final messagesJson = decoded['cached_messages'] as Map<String, dynamic>?;
       if (messagesJson != null) {
-        final Map<String, dynamic> data = jsonDecode(messagesJson);
-        for (var entry in data.entries) {
+        for (var entry in messagesJson.entries) {
           _cachedMessages[entry.key] =
               List<Map<String, dynamic>>.from(entry.value);
         }
       }
 
       // Load comrades
-      final comradesJson = prefs.getString('cached_comrades');
+      final comradesJson = decoded['cached_comrades'] as List<dynamic>?;
       if (comradesJson != null) {
-        comrades = List<Map<String, dynamic>>.from(jsonDecode(comradesJson));
+        comrades = comradesJson.cast<Map<String, dynamic>>();
       }
 
       // Load user comrades
-      final userComradesList = prefs.getStringList('cached_user_comrades');
+      final userComradesList =
+          decoded['cached_user_comrades'] as List<dynamic>?;
       if (userComradesList != null) {
         userComrades = Set<String>.from(userComradesList);
       }
 
       // Load comrade voters
-      final comradeVotersJson = prefs.getString('cached_comrade_voters');
+      final comradeVotersJson =
+          decoded['cached_comrade_voters'] as Map<String, dynamic>?;
       if (comradeVotersJson != null) {
-        final Map<String, dynamic> data = jsonDecode(comradeVotersJson);
-        for (var entry in data.entries) {
+        for (var entry in comradeVotersJson.entries) {
           final List<dynamic> list = entry.value;
           comradeVoters[entry.key] = list
               .map(
@@ -841,47 +912,46 @@ class AppCache {
       }
 
       // Load per-channel vote counts
-      final perChannelVotesJson = prefs.getString('per_channel_vote_counts');
+      final perChannelVotesJson =
+          decoded['per_channel_vote_counts'] as Map<String, dynamic>?;
       if (perChannelVotesJson != null) {
-        final Map<String, dynamic> data = jsonDecode(perChannelVotesJson);
-        for (var entry in data.entries) {
+        for (var entry in perChannelVotesJson.entries) {
           perChannelVoteCounts[entry.key] = Map<String, int>.from(entry.value);
         }
       }
 
       // Load history games
-      final historyGamesJson = prefs.getString('history_games_cache');
+      final historyGamesJson = decoded['history_games_cache'] as List<dynamic>?;
       if (historyGamesJson != null) {
-        final List<dynamic> data = jsonDecode(historyGamesJson);
-        historyGames = data
+        historyGames = historyGamesJson
             .map((g) => HistoryGame.fromJson(g as Map<String, dynamic>))
+            .take(_maxHistoryGames)
             .toList();
       }
 
       // Load aftermatch data
-      final aftermatchJson = prefs.getString('aftermatch_data_cache');
+      final aftermatchJson =
+          decoded['aftermatch_data_cache'] as Map<String, dynamic>?;
       if (aftermatchJson != null) {
-        final Map<String, dynamic> data = jsonDecode(aftermatchJson);
-        for (var entry in data.entries) {
+        for (var entry in aftermatchJson.entries) {
           _aftermatchData[entry.key] =
               AftermatchData.fromJson(entry.value as Map<String, dynamic>);
         }
       }
 
       // Load live events
-      final liveEventsJson = prefs.getString('live_events_cache');
+      final liveEventsJson =
+          decoded['live_events_cache'] as Map<String, dynamic>?;
       if (liveEventsJson != null) {
-        final Map<String, dynamic> data = jsonDecode(liveEventsJson);
-        for (var entry in data.entries) {
+        for (var entry in liveEventsJson.entries) {
           _liveEvents[entry.key] = List<Map<String, dynamic>>.from(entry.value);
         }
       }
 
       // Load voters list
-      final votersJson = prefs.getString('voters_cache');
+      final votersJson = decoded['voters_cache'] as Map<String, dynamic>?;
       if (votersJson != null) {
-        final Map<String, dynamic> data = jsonDecode(votersJson);
-        for (var entry in data.entries) {
+        for (var entry in votersJson.entries) {
           _votersList[entry.key] = List<Map<String, dynamic>>.from(entry.value);
         }
       }
@@ -897,22 +967,28 @@ class AppCache {
   }
 
   // ==========================================================================
-  // SAVE FIXTURES
+  // SAVE FIXTURES - OPTIMIZED
   // ==========================================================================
   static Future<void> saveFixtures(List<Fixture> newFixtures) async {
     try {
-      fixtures = newFixtures;
+      // Filter out completed/finished fixtures
+      final filtered = newFixtures
+          .where((f) => f.status != 'completed' && f.status != 'finished')
+          .take(_maxCachedFixtures)
+          .toList();
+
+      fixtures = filtered;
 
       final prefs = await SharedPreferences.getInstance();
-      final fixturesJson = fixtures.map((f) => f.toJson()).toList();
-      await prefs.setString('fixtures_cache', jsonEncode(fixturesJson));
+      final fixturesJson = filtered.map((f) => f.toJson()).toList();
+      final encoded = await JsonWorker.encodeToJson(fixturesJson);
+      await prefs.setString('fixtures_cache', encoded);
       await prefs.setInt(
           'fixtures_timestamp', DateTime.now().millisecondsSinceEpoch ~/ 1000);
 
-      // Notify listeners
-      _fixturesController.add(fixtures);
+      _fixturesController.add(filtered);
 
-      debugPrint('💾 Saved ${fixtures.length} fixtures to disk');
+      debugPrint('💾 Saved ${filtered.length} fixtures to disk');
     } catch (e) {
       debugPrint('❌ Error saving fixtures: $e');
     }
@@ -923,9 +999,13 @@ class AppCache {
       final prefs = await SharedPreferences.getInstance();
       final serialized = <String, dynamic>{};
       for (var entry in _postComments.entries) {
-        serialized[entry.key] = entry.value.map((c) => c.toJson()).toList();
+        serialized[entry.key] = entry.value
+            .take(_maxCommentsPerFixture)
+            .map((c) => c.toJson())
+            .toList();
       }
-      await prefs.setString('post_comments_cache', json.encode(serialized));
+      final encoded = await JsonWorker.encodeToJson(serialized);
+      await prefs.setString('post_comments_cache', encoded);
     } catch (e) {
       developer.log('⚠️ Failed to save post comments: $e', name: 'AppCache');
     }
@@ -937,7 +1017,7 @@ class AppCache {
         final prefs = await SharedPreferences.getInstance();
         final data = prefs.getString('post_comments_cache');
         if (data != null) {
-          final Map<String, dynamic> decoded = jsonDecode(data);
+          final decoded = await JsonWorker.decodeMap(data);
           for (var entry in decoded.entries) {
             final List<dynamic> list = entry.value;
             _postComments[entry.key] = list
@@ -957,16 +1037,14 @@ class AppCache {
   }
 
   // ==========================================================================
-  // SAVE/Load USER VOTES
+  // SAVE/LOAD USER VOTES
   // ==========================================================================
- 
-
   static Future<void> loadUserVotes() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final data = prefs.getString('cached_user_votes');
       if (data != null) {
-        final Map<String, dynamic> decoded = jsonDecode(data);
+        final decoded = await JsonWorker.decodeMap(data);
         userVotes = Map<String, String>.from(decoded);
         if (kDebugMode) {
           developer.log('📦 AppCache: Loaded ${userVotes.length} user votes',
@@ -1098,14 +1176,12 @@ class AppCache {
   static final Map<String, List<Map<String, dynamic>>> _cachedMessages = {};
   static Map<String, List<Map<String, dynamic>>> get cachedMessages =>
       _cachedMessages;
-// ==========================================================================
+
+  // ==========================================================================
   // MESSAGE DISK-LOAD COORDINATION
   // ==========================================================================
-  // Guards against _loadDeferredData() (background, unawaited from load())
-  // and getCachedMessagesAsync() (called from ChatScreen on navigation)
-  // both reading 'cached_messages' from SharedPreferences at the same time.
-  // Whichever one starts first "wins" and the other just awaits its result.
   static Completer<void>? _messagesDiskLoadCompleter;
+
   // ==========================================================================
   // ADMIN DASHBOARD CACHES
   // ==========================================================================
@@ -1160,7 +1236,8 @@ class AppCache {
       for (var entry in _aftermatchData.entries) {
         serialized[entry.key] = entry.value.toJson();
       }
-      await prefs.setString('aftermatch_data_cache', json.encode(serialized));
+      final encoded = await JsonWorker.encodeToJson(serialized);
+      await prefs.setString('aftermatch_data_cache', encoded);
     } catch (e) {
       developer.log('⚠️ Failed to save aftermatch data: $e', name: 'AppCache');
     }
@@ -1172,7 +1249,7 @@ class AppCache {
       final data = prefs.getString('aftermatch_data_cache');
       if (data == null) return;
 
-      final Map<String, dynamic> decoded = json.decode(data);
+      final decoded = await JsonWorker.decodeMap(data);
       for (var entry in decoded.entries) {
         _aftermatchData[entry.key] =
             AftermatchData.fromJson(entry.value as Map<String, dynamic>);
@@ -1339,9 +1416,9 @@ class AppCache {
   static bool _criticalLoaded = false;
 
   // ==========================================================================
-  // SINGLE UPDATE METHOD
+  // SINGLE UPDATE METHOD - OPTIMIZED
   // ==========================================================================
-    static void applyUpdate({
+  static void applyUpdate({
     required String fixtureId,
     required String updateType,
     required int value,
@@ -1374,7 +1451,7 @@ class AppCache {
 
         if (extraData?['userVote'] != null) {
           userVotes[fixtureId] = extraData!['userVote'] as String;
-          saveUserVotes(); // now debounced internally, see below
+          saveUserVotes();
           notifyVotesChanged();
         }
 
@@ -1459,7 +1536,7 @@ class AppCache {
         if (event != null) {
           final events = _liveEvents[fixtureId] ?? [];
           events.insert(0, event);
-          if (events.length > 20) events.removeLast();
+          if (events.length > _maxLiveEvents) events.removeLast();
           _liveEvents[fixtureId] = events;
         }
         break;
@@ -1472,13 +1549,6 @@ class AppCache {
         break;
     }
 
-    // ✅ CHANGED — was an unawaited immediate _saveToDisk(...) on every
-    // single event. Under live commentary this can fire multiple times a
-    // second, each one decoding + re-encoding the full cache map for that
-    // update type on the main thread. Debounced per (updateType, fixtureId)
-    // so a burst collapses into one write ~400ms after it settles.
-    // In-memory state above is still updated synchronously — only disk
-    // persistence is deferred.
     DiskWriteScheduler.schedule(
       '$updateType:$fixtureId',
       () => _saveToDisk(fixtureId, updateType, value, extraData),
@@ -1486,6 +1556,7 @@ class AppCache {
 
     _fixturesController.add(fixtures);
   }
+
   static DateTime? _getLastUpdate(String fixtureId, String type) {
     switch (type) {
       case 'vote':
@@ -1519,7 +1590,7 @@ class AppCache {
   }
 
   // ==========================================================================
-  // BACKGROUND SAVE TO DISK
+  // BACKGROUND SAVE TO DISK - OPTIMIZED
   // ==========================================================================
   static Future<void> _saveToDisk(
     String fixtureId,
@@ -1537,12 +1608,14 @@ class AppCache {
           final channelId = extraData?['channelId'] as String? ?? 'default';
           data[fixtureId] ??= {};
           data[fixtureId][channelId] = value;
-          await prefs.setString('per_channel_vote_counts', json.encode(data));
+          final encoded = await JsonWorker.encodeToJson(data);
+          await prefs.setString('per_channel_vote_counts', encoded);
 
           final fastData = prefs.getString('vote_counts_cache') ?? '{}';
           final Map<String, dynamic> fastMap = json.decode(fastData);
           fastMap[fixtureId] = value;
-          await prefs.setString('vote_counts_cache', json.encode(fastMap));
+          final fastEncoded = await JsonWorker.encodeToJson(fastMap);
+          await prefs.setString('vote_counts_cache', fastEncoded);
 
           if (extraData?['userVote'] != null) {
             userVotes[fixtureId] = extraData!['userVote'] as String;
@@ -1554,35 +1627,40 @@ class AppCache {
           final commentData = prefs.getString('comment_counts_cache') ?? '{}';
           final Map<String, dynamic> data = json.decode(commentData);
           data[fixtureId] = value;
-          await prefs.setString('comment_counts_cache', json.encode(data));
+          final encoded = await JsonWorker.encodeToJson(data);
+          await prefs.setString('comment_counts_cache', encoded);
           break;
 
         case 'like':
           final likeData = prefs.getString('like_counts_cache') ?? '{}';
           final Map<String, dynamic> data = json.decode(likeData);
           data[fixtureId] = value;
-          await prefs.setString('like_counts_cache', json.encode(data));
+          final encoded = await JsonWorker.encodeToJson(data);
+          await prefs.setString('like_counts_cache', encoded);
           break;
 
         case 'pledge':
           final pledgeData = prefs.getString('pledge_counts_cache') ?? '{}';
           final Map<String, dynamic> data = json.decode(pledgeData);
           data[fixtureId] = value;
-          await prefs.setString('pledge_counts_cache', json.encode(data));
+          final encoded = await JsonWorker.encodeToJson(data);
+          await prefs.setString('pledge_counts_cache', encoded);
           break;
 
         case 'bet':
           final betData = prefs.getString('bet_counts_cache') ?? '{}';
           final Map<String, dynamic> data = json.decode(betData);
           data[fixtureId] = value;
-          await prefs.setString('bet_counts_cache', json.encode(data));
+          final encoded = await JsonWorker.encodeToJson(data);
+          await prefs.setString('bet_counts_cache', encoded);
           break;
 
         case 'unread':
           final unreadData = prefs.getString('unread_counts_cache') ?? '{}';
           final Map<String, dynamic> data = json.decode(unreadData);
           data[fixtureId] = value;
-          await prefs.setString('unread_counts_cache', json.encode(data));
+          final encoded = await JsonWorker.encodeToJson(data);
+          await prefs.setString('unread_counts_cache', encoded);
           break;
 
         case 'latest_comment':
@@ -1593,7 +1671,8 @@ class AppCache {
             'author': extraData?['username'],
             'timestamp': DateTime.now().toIso8601String(),
           };
-          await prefs.setString('latest_comments_cache', json.encode(data));
+          final encoded = await JsonWorker.encodeToJson(data);
+          await prefs.setString('latest_comments_cache', encoded);
           break;
 
         case 'live_event':
@@ -1603,9 +1682,10 @@ class AppCache {
           final event = extraData?['event'] as Map<String, dynamic>?;
           if (event != null) {
             events.insert(0, event);
-            if (events.length > 20) events.removeLast();
+            if (events.length > _maxLiveEvents) events.removeLast();
             data[fixtureId] = events;
-            await prefs.setString('live_events_cache', json.encode(data));
+            final encoded = await JsonWorker.encodeToJson(data);
+            await prefs.setString('live_events_cache', encoded);
           }
           break;
 
@@ -1616,7 +1696,8 @@ class AppCache {
               extraData?['voters'] as List<Map<String, dynamic>>?;
           if (votersList != null) {
             data[fixtureId] = votersList;
-            await prefs.setString('voters_cache', json.encode(data));
+            final encoded = await JsonWorker.encodeToJson(data);
+            await prefs.setString('voters_cache', encoded);
           }
           break;
       }
@@ -1626,10 +1707,8 @@ class AppCache {
   }
 
   // ==========================================================================
-  // SAVE METHODS
+  // SAVE METHODS - OPTIMIZED
   // ==========================================================================
-  
-  
   static Future<void> saveLatestComment(
     String fixtureId,
     String comment,
@@ -1661,7 +1740,8 @@ class AppCache {
       }
 
       data[fixtureId] = commentData;
-      await prefs.setString('latest_comments_cache', json.encode(data));
+      final encoded = await JsonWorker.encodeToJson(data);
+      await prefs.setString('latest_comments_cache', encoded);
 
       _latestComments[fixtureId] = comment;
       _latestCommentAuthors[fixtureId] = author;
@@ -1705,10 +1785,6 @@ class AppCache {
     return _latestCommentIsCommentaryReply[fixtureId] ?? false;
   }
 
-  
-
- 
-
   // ==========================================================================
   // CHAT MESSAGE FETCHING
   // ==========================================================================
@@ -1750,7 +1826,7 @@ class AppCache {
         final key = fixtureId != null
             ? '${channelId}_$fixtureId'
             : '${channelId}_overall';
-        _cachedMessages[key] = messages;
+        _cachedMessages[key] = messages.take(_maxMessagesPerFixture).toList();
         await _saveMessagesToDisk();
 
         if (kDebugMode) {
@@ -1867,7 +1943,7 @@ class AppCache {
   }
 
   // ==========================================================================
-  // REFRESH ALL
+  // REFRESH ALL - OPTIMIZED
   // ==========================================================================
   static Future<void> refreshAll() async {
     if (kDebugMode) {
@@ -1908,9 +1984,9 @@ class AppCache {
   }
 
   // ==========================================================================
-  // REFRESH FIXTURES WITH TIME - DIFFED (only notifies on real change)
+  // REFRESH FIXTURES WITH TIME - OPTIMIZED
   // ==========================================================================
-    static Future<void> refreshFixturesWithTime() async {
+  static Future<void> refreshFixturesWithTime() async {
     try {
       final response = await http.get(
         Uri.parse(
@@ -1929,18 +2005,12 @@ class AppCache {
         final List<dynamic> fixturesData =
             data['data'] ?? data['fixtures'] ?? [];
 
-        // ✅ FIX: filter out completed/finished games — without this,
-        // the 5-minute background timer was silently re-injecting
-        // history games back into AppCache.fixtures (and disk), which
-        // is what made "completed" fixtures reappear on FixturesPage.
         final newFixtures = fixturesData
             .map((f) => Fixture.fromJson(f))
             .where((f) => f.status != 'completed' && f.status != 'finished')
+            .take(_maxCachedFixtures)
             .toList();
 
-        // ✅ Compare against what's currently held before touching anything.
-        // A JSON-based compare avoids requiring Fixture to implement ==/hashCode
-        // itself — if two payloads serialize identically, nothing changed.
         final bool changed = !_fixtureListsEqual(fixtures, newFixtures);
 
         if (!changed) {
@@ -1976,13 +2046,7 @@ class AppCache {
           name: 'AppCache');
     }
   }
-  // Structural compare via toJson() — cheap, no need to touch the Fixture
-  // model. Order-sensitive on purpose: if the API reorders fixtures, that's
-  // a real change worth repainting for.
-    // ✅ CHANGED — was json.encode(toJson()) on every fixture in both lists,
-  // on every refresh (including the 5-minute auto-timer), just to answer
-  // "did anything change?". Real updates only ever touch a few fields, so
-  // build a signature from those instead of the full object graph.
+
   static bool _fixtureListsEqual(List<Fixture> a, List<Fixture> b) {
     if (a.length != b.length) return false;
     for (var i = 0; i < a.length; i++) {
@@ -1997,8 +2061,9 @@ class AppCache {
     final id = f.matchId ?? f.id;
     return '$id|${f.status}|${f.homeScore}|${f.awayScore}|${f.timeElapsed}|${f.isLive}';
   }
+
   // ==========================================================================
-  // REFRESH CHANNELS - DIFFED
+  // REFRESH CHANNELS - OPTIMIZED
   // ==========================================================================
   static Future<void> refreshChannels(String userId, String? authToken) async {
     try {
@@ -2044,7 +2109,7 @@ class AppCache {
 
         channels = newChannels;
         await saveChannels(channels);
-        _fixturesController.add(fixtures); // existing behavior preserved
+        _fixturesController.add(fixtures);
         if (kDebugMode) {
           developer.log(
               '✅ AppCache: Refreshed ${channels.length} channels (changed)',
@@ -2058,7 +2123,7 @@ class AppCache {
   }
 
   // ==========================================================================
-  // REFRESH COMRADES - DIFFED
+  // REFRESH COMRADES - OPTIMIZED
   // ==========================================================================
   static Future<void> refreshComrades(String? authToken) async {
     try {
@@ -2123,7 +2188,8 @@ class AppCache {
         comrades = newComrades;
 
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('cached_comrades', jsonEncode(comrades));
+        final encoded = await JsonWorker.encodeToJson(comrades);
+        await prefs.setString('cached_comrades', encoded);
         if (kDebugMode) {
           developer.log(
               '✅ AppCache: Refreshed ${comrades.length} comrades (changed)',
@@ -2136,7 +2202,6 @@ class AppCache {
     }
   }
 
-  // Generic structural compare for List<Map<String, dynamic>> payloads.
   static bool _listsEqualByJson(
     List<Map<String, dynamic>> a,
     List<Map<String, dynamic>> b,
@@ -2232,11 +2297,11 @@ class AppCache {
   }
 
   // ==========================================================================
-  // INSTANT FIXTURES LOAD
+  // INSTANT FIXTURES LOAD - OPTIMIZED
   // ==========================================================================
   static const int _instantFixturesCount = 10;
 
-    static Future<void> loadFixturesInstantly() async {
+  static Future<void> loadFixturesInstantly() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final fixturesJson = prefs.getString('fixtures_cache');
@@ -2244,18 +2309,10 @@ class AppCache {
       if (fixturesJson != null) {
         final List<dynamic> data = jsonDecode(fixturesJson);
 
-        // ✅ Only build Fixture objects for the first N entries synchronously —
-        // this is the part that blocks first paint, so keep it tiny. The
-        // jsonDecode() above is unavoidable (need the array to slice it), but
-        // Fixture.fromJson() per-item parsing/validation is the actual cost
-        // when the cache has hundreds of fixtures with nested subFixtures.
         final int instantCount = data.length < _instantFixturesCount
             ? data.length
             : _instantFixturesCount;
 
-        // ✅ FIX: filter completed/finished here too, so a disk cache that
-        // was written before this fix (or written by any other code path
-        // that skips the filter) doesn't resurrect old games on cold start.
         fixtures = data
             .take(instantCount)
             .map((f) => Fixture.fromJson(f as Map<String, dynamic>))
@@ -2268,11 +2325,8 @@ class AppCache {
               name: 'AppCache');
         }
 
-        // ✅ Finish parsing the remainder AFTER first frame, off the
-        // synchronous cold-start path. This still runs fast (same process,
-        // no I/O) but no longer delays runApp()/first paint.
         if (data.length > instantCount) {
-          _fixturesController.add(fixtures); // notify with partial list first
+          _fixturesController.add(fixtures);
 
           scheduleMicrotask(() {
             try {
@@ -2281,6 +2335,7 @@ class AppCache {
                   .map((f) => Fixture.fromJson(f as Map<String, dynamic>))
                   .where(
                       (f) => f.status != 'completed' && f.status != 'finished')
+                  .take(_maxCachedFixtures - instantCount)
                   .toList();
 
               fixtures = [...fixtures, ...remaining];
@@ -2330,11 +2385,7 @@ class AppCache {
 
     unawaited(_loadDeferredData());
     unawaited(_loadAftermatchDataFromDisk());
-    _lazyLoadHistoryCommentsFromDisk(); // ✅ ADDED — same class of bug as
-    // _cachedMessages: history comments were only ever pulled from disk
-    // reactively via getCachedHistoryComments(), which is too late for
-    // first paint on a cold start. This kicks the disk read off eagerly
-    // at load-time instead of waiting for something to ask for it.
+    _lazyLoadHistoryCommentsFromDisk();
 
     if (kDebugMode) {
       developer.log('⚡ AppCache: Critical data ready, UI can paint',
@@ -2399,32 +2450,21 @@ class AppCache {
   static Future<void> _loadDeferredData() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      final data = prefs.getString('app_cache_data');
 
-      final deferredKeys = [
-        'history_games_cache',
-        'cached_comrades',
-        'cached_user_comrades',
-        'cached_comrade_voters',
-        'per_channel_vote_counts',
-        'vote_counts_cache',
-        'comment_counts_cache',
-        'like_counts_cache',
-        'pledge_counts_cache',
-        'bet_counts_cache',
-        'unread_counts_cache',
-        'latest_comments_cache',
-        'channel_fixtures_cache',
-        'cached_messages', // ✅ ADDED — was silently skipped before
-      ];
+      if (data == null) {
+        debugPrint('📭 No app cache data found for deferred load');
+        return;
+      }
 
-      final values = await Future.wait(
-          deferredKeys.map((k) => Future.value(prefs.getString(k))));
-      final map = Map<String, String?>.fromIterables(deferredKeys, values);
+      final decoded = await JsonWorker.decodeMap(data);
 
-      if (map['history_games_cache'] != null) {
-        final List<dynamic> data = jsonDecode(map['history_games_cache']!);
-        historyGames = data
+      // Load history games
+      final historyGamesJson = decoded['history_games_cache'] as List<dynamic>?;
+      if (historyGamesJson != null) {
+        historyGames = historyGamesJson
             .map((g) => HistoryGame.fromJson(g as Map<String, dynamic>))
+            .take(_maxHistoryGames)
             .toList();
         _historyController.add(historyGames);
         if (kDebugMode) {
@@ -2434,16 +2474,19 @@ class AppCache {
         }
       }
 
-      if (map['cached_comrades'] != null) {
-        final List<dynamic> data = jsonDecode(map['cached_comrades']!);
-        comrades = data.cast<Map<String, dynamic>>();
+      // Load comrades
+      final comradesJson = decoded['cached_comrades'] as List<dynamic>?;
+      if (comradesJson != null) {
+        comrades = comradesJson.cast<Map<String, dynamic>>();
         if (kDebugMode) {
           developer.log('⏳ Deferred: ${comrades.length} comrades loaded',
               name: 'AppCache');
         }
       }
 
-      final userComradesList = prefs.getStringList('cached_user_comrades');
+      // Load user comrades
+      final userComradesList =
+          decoded['cached_user_comrades'] as List<dynamic>?;
       if (userComradesList != null) {
         userComrades = Set<String>.from(userComradesList);
         if (kDebugMode) {
@@ -2452,10 +2495,11 @@ class AppCache {
         }
       }
 
-      if (map['cached_comrade_voters'] != null) {
-        final Map<String, dynamic> data =
-            jsonDecode(map['cached_comrade_voters']!);
-        for (var entry in data.entries) {
+      // Load comrade voters
+      final comradeVotersJson =
+          decoded['cached_comrade_voters'] as Map<String, dynamic>?;
+      if (comradeVotersJson != null) {
+        for (var entry in comradeVotersJson.entries) {
           final List<dynamic> votersList = entry.value;
           comradeVoters[entry.key] = votersList
               .map(
@@ -2468,64 +2512,75 @@ class AppCache {
         }
       }
 
-      if (map['per_channel_vote_counts'] != null) {
-        final Map<String, dynamic> data =
-            jsonDecode(map['per_channel_vote_counts']!);
-        for (var entry in data.entries) {
+      // Load per-channel vote counts
+      final perChannelVotesJson =
+          decoded['per_channel_vote_counts'] as Map<String, dynamic>?;
+      if (perChannelVotesJson != null) {
+        for (var entry in perChannelVotesJson.entries) {
           perChannelVoteCounts[entry.key] =
               Map<String, int>.from(entry.value as Map);
         }
       }
 
-      if (map['vote_counts_cache'] != null) {
-        final Map<String, dynamic> data = jsonDecode(map['vote_counts_cache']!);
-        for (var entry in data.entries) {
+      // Load vote counts
+      final voteCountsJson =
+          decoded['vote_counts_cache'] as Map<String, dynamic>?;
+      if (voteCountsJson != null) {
+        for (var entry in voteCountsJson.entries) {
           _voteCounts[entry.key] = entry.value as int;
         }
       }
 
-      if (map['comment_counts_cache'] != null) {
-        final Map<String, dynamic> data =
-            jsonDecode(map['comment_counts_cache']!);
-        for (var entry in data.entries) {
+      // Load comment counts
+      final commentCountsJson =
+          decoded['comment_counts_cache'] as Map<String, dynamic>?;
+      if (commentCountsJson != null) {
+        for (var entry in commentCountsJson.entries) {
           _commentCounts[entry.key] = entry.value as int;
         }
       }
 
-      if (map['like_counts_cache'] != null) {
-        final Map<String, dynamic> data = jsonDecode(map['like_counts_cache']!);
-        for (var entry in data.entries) {
+      // Load like counts
+      final likeCountsJson =
+          decoded['like_counts_cache'] as Map<String, dynamic>?;
+      if (likeCountsJson != null) {
+        for (var entry in likeCountsJson.entries) {
           _likeCounts[entry.key] = entry.value as int;
         }
       }
 
-      if (map['pledge_counts_cache'] != null) {
-        final Map<String, dynamic> data =
-            jsonDecode(map['pledge_counts_cache']!);
-        for (var entry in data.entries) {
+      // Load pledge counts
+      final pledgeCountsJson =
+          decoded['pledge_counts_cache'] as Map<String, dynamic>?;
+      if (pledgeCountsJson != null) {
+        for (var entry in pledgeCountsJson.entries) {
           _pledgeCounts[entry.key] = entry.value as int;
         }
       }
 
-      if (map['bet_counts_cache'] != null) {
-        final Map<String, dynamic> data = jsonDecode(map['bet_counts_cache']!);
-        for (var entry in data.entries) {
+      // Load bet counts
+      final betCountsJson =
+          decoded['bet_counts_cache'] as Map<String, dynamic>?;
+      if (betCountsJson != null) {
+        for (var entry in betCountsJson.entries) {
           _betCounts[entry.key] = entry.value as int;
         }
       }
 
-      if (map['unread_counts_cache'] != null) {
-        final Map<String, dynamic> data =
-            jsonDecode(map['unread_counts_cache']!);
-        for (var entry in data.entries) {
+      // Load unread counts
+      final unreadCountsJson =
+          decoded['unread_counts_cache'] as Map<String, dynamic>?;
+      if (unreadCountsJson != null) {
+        for (var entry in unreadCountsJson.entries) {
           _unreadCounts[entry.key] = entry.value as int;
         }
       }
 
-      if (map['latest_comments_cache'] != null) {
-        final Map<String, dynamic> data =
-            jsonDecode(map['latest_comments_cache']!);
-        for (var entry in data.entries) {
+      // Load latest comments
+      final latestCommentsJson =
+          decoded['latest_comments_cache'] as Map<String, dynamic>?;
+      if (latestCommentsJson != null) {
+        for (var entry in latestCommentsJson.entries) {
           final item = entry.value as Map<String, dynamic>;
           _latestComments[entry.key] = item['comment'] as String?;
           _latestCommentAuthors[entry.key] = item['author'] as String?;
@@ -2540,10 +2595,11 @@ class AppCache {
         }
       }
 
-      if (map['channel_fixtures_cache'] != null) {
-        final Map<String, dynamic> data =
-            jsonDecode(map['channel_fixtures_cache']!);
-        for (var entry in data.entries) {
+      // Load channel fixtures
+      final channelFixturesJson =
+          decoded['channel_fixtures_cache'] as Map<String, dynamic>?;
+      if (channelFixturesJson != null) {
+        for (var entry in channelFixturesJson.entries) {
           channelFixtures[entry.key] =
               ChannelFixtureData.fromJson(entry.value as Map<String, dynamic>);
         }
@@ -2554,20 +2610,14 @@ class AppCache {
         }
       }
 
-      // ✅ NEW BLOCK — this was the missing piece. Without this,
-      // _cachedMessages stayed empty after a cold start until something
-      // called getCachedMessages() and triggered the fire-and-forget
-      // _lazyLoadMessagesFromDisk(), which was too late for first paint.
-      // Coordinates with getCachedMessagesAsync() via the shared completer
-      // so a ChatScreen navigation racing this background load doesn't
-      // trigger two separate SharedPreferences reads of the same key.
-      if (map['cached_messages'] != null &&
+      // Load messages
+      final messagesJson = decoded['cached_messages'] as Map<String, dynamic>?;
+      if (messagesJson != null &&
           _messagesDiskLoadCompleter == null &&
           !_cachedMessages.isNotEmpty) {
         _messagesDiskLoadCompleter = Completer<void>();
         try {
-          final Map<String, dynamic> data = jsonDecode(map['cached_messages']!);
-          for (var entry in data.entries) {
+          for (var entry in messagesJson.entries) {
             _cachedMessages.putIfAbsent(
               entry.key,
               () => List<Map<String, dynamic>>.from(entry.value),
@@ -2592,19 +2642,10 @@ class AppCache {
     }
   }
 
-// ==========================================================================
-  // APPEND SINGLE MESSAGE TO CACHE - FOR SENDERS/RECEIVERS OUTSIDE CHATSCREEN
   // ==========================================================================
-  // FixturesPage and HistoryPage can send AND receive chat messages for a
-  // fixture without ChatScreen ever being open. Previously those messages
-  // only lived in each page's own local state (_fixtureComments) and never
-  // touched _cachedMessages — the exact map ChatScreen reads from on open.
-  // Combined with ChatScreen's one-shot-per-session hydration guard (it
-  // only ever hits the network once per fixture per app run), a comment
-  // posted from FixturesPage was invisible to ChatScreen until the app
-  // process was killed and restarted. This keeps _cachedMessages current
-  // no matter which screen sent or received the message.
-   static void appendCachedMessage(
+  // APPEND SINGLE MESSAGE TO CACHE
+  // ==========================================================================
+  static void appendCachedMessage(
     String channelId,
     String fixtureId,
     Map<String, dynamic> message,
@@ -2619,11 +2660,11 @@ class AppCache {
         (tempId != null && m['tempId']?.toString() == tempId));
     if (alreadyExists) return;
 
-    _cachedMessages[key] = [...list, message];
+    final newList = [...list, message];
+    _cachedMessages[key] = newList.length > _maxMessagesPerFixture
+        ? newList.skip(newList.length - _maxMessagesPerFixture).toList()
+        : newList;
 
-    // ✅ CHANGED — debounced. A burst of incoming messages right after
-    // joining a live room previously triggered one full _cachedMessages
-    // encode+write per message.
     DiskWriteScheduler.schedule('cached_messages_disk', _saveMessagesToDisk);
 
     if (kDebugMode) {
@@ -2634,15 +2675,8 @@ class AppCache {
   }
 
   // ==========================================================================
-  // ASYNC MESSAGE CACHE READ - GUARANTEES DISK IS LOADED BEFORE RETURNING
+  // ASYNC MESSAGE CACHE READ
   // ==========================================================================
-  // getCachedMessages() is synchronous and, on a cold process where
-  // _cachedMessages is still empty, kicks off _lazyLoadMessagesFromDisk()
-  // in the background and returns null immediately — the caller has no way
-  // to wait for that disk read. This async version actually awaits the
-  // SharedPreferences read the first time it's needed, so a fresh
-  // ChatScreen._loadMessages() call gets real cached data instead of null
-  // on the very first frame after a cold start.
   static Future<List<Map<String, dynamic>>?> getCachedMessagesAsync(
     String channelId,
     String? fixtureId,
@@ -2654,9 +2688,6 @@ class AppCache {
       return _cachedMessages[key];
     }
 
-    // If a disk load is already in flight (started by _loadDeferredData()
-    // in the background, or by an earlier call to this method), wait for
-    // that one instead of starting a second concurrent read.
     if (_messagesDiskLoadCompleter != null) {
       await _messagesDiskLoadCompleter!.future;
       return _cachedMessages[key];
@@ -2665,21 +2696,23 @@ class AppCache {
     _messagesDiskLoadCompleter = Completer<void>();
     try {
       final prefs = await SharedPreferences.getInstance();
-      final data = prefs.getString('cached_messages');
+      final data = prefs.getString('app_cache_data');
       if (data != null) {
-        final Map<String, dynamic> decoded = jsonDecode(data);
-        for (var entry in decoded.entries) {
-          // Don't clobber anything newer that landed in memory while this
-          // read was in flight (e.g. a message arriving over WebSocket).
-          _cachedMessages.putIfAbsent(
-            entry.key,
-            () => List<Map<String, dynamic>>.from(entry.value),
-          );
-        }
-        if (kDebugMode) {
-          developer.log(
-              '📦 getCachedMessagesAsync: hydrated ${_cachedMessages.length} message threads from disk',
-              name: 'AppCache');
+        final decoded = await JsonWorker.decodeMap(data);
+        final messagesJson =
+            decoded['cached_messages'] as Map<String, dynamic>?;
+        if (messagesJson != null) {
+          for (var entry in messagesJson.entries) {
+            _cachedMessages.putIfAbsent(
+              entry.key,
+              () => List<Map<String, dynamic>>.from(entry.value),
+            );
+          }
+          if (kDebugMode) {
+            developer.log(
+                '📦 getCachedMessagesAsync: hydrated ${_cachedMessages.length} message threads from disk',
+                name: 'AppCache');
+          }
         }
       }
     } catch (e) {
@@ -2709,7 +2742,7 @@ class AppCache {
         final prefs = await SharedPreferences.getInstance();
         final data = prefs.getString('cached_lineups');
         if (data != null) {
-          final Map<String, dynamic> decoded = jsonDecode(data);
+          final decoded = await JsonWorker.decodeMap(data);
           for (var entry in decoded.entries) {
             _cachedLineups[entry.key] = Map<String, dynamic>.from(entry.value);
           }
@@ -2738,7 +2771,7 @@ class AppCache {
         final prefs = await SharedPreferences.getInstance();
         final data = prefs.getString('cached_channel_members');
         if (data != null) {
-          final Map<String, dynamic> decoded = jsonDecode(data);
+          final decoded = await JsonWorker.decodeMap(data);
           for (var entry in decoded.entries) {
             _cachedChannelMembers[entry.key] =
                 List<Map<String, dynamic>>.from(entry.value);
@@ -2770,7 +2803,7 @@ class AppCache {
         final prefs = await SharedPreferences.getInstance();
         final data = prefs.getString('cached_channel_stats');
         if (data != null) {
-          final Map<String, dynamic> decoded = jsonDecode(data);
+          final decoded = await JsonWorker.decodeMap(data);
           for (var entry in decoded.entries) {
             _cachedChannelStats[entry.key] =
                 Map<String, dynamic>.from(entry.value);
@@ -2802,7 +2835,7 @@ class AppCache {
         final prefs = await SharedPreferences.getInstance();
         final data = prefs.getString('cached_comrade_leaderboard');
         if (data != null) {
-          final Map<String, dynamic> decoded = jsonDecode(data);
+          final decoded = await JsonWorker.decodeMap(data);
           for (var entry in decoded.entries) {
             _cachedComradeLeaderboard[entry.key] =
                 List<Map<String, dynamic>>.from(entry.value);
@@ -2834,7 +2867,7 @@ class AppCache {
         final prefs = await SharedPreferences.getInstance();
         final data = prefs.getString('cached_comrade_voters_data');
         if (data != null) {
-          final Map<String, dynamic> decoded = jsonDecode(data);
+          final decoded = await JsonWorker.decodeMap(data);
           for (var entry in decoded.entries) {
             _cachedComradeVotersData[entry.key] =
                 List<Map<String, dynamic>>.from(entry.value);
@@ -2866,7 +2899,7 @@ class AppCache {
         final prefs = await SharedPreferences.getInstance();
         final data = prefs.getString('live_events_cache');
         if (data != null) {
-          final Map<String, dynamic> decoded = jsonDecode(data);
+          final decoded = await JsonWorker.decodeMap(data);
           for (var entry in decoded.entries) {
             _liveEvents[entry.key] =
                 List<Map<String, dynamic>>.from(entry.value);
@@ -2896,7 +2929,7 @@ class AppCache {
         final prefs = await SharedPreferences.getInstance();
         final data = prefs.getString('voters_cache');
         if (data != null) {
-          final Map<String, dynamic> decoded = jsonDecode(data);
+          final decoded = await JsonWorker.decodeMap(data);
           for (var entry in decoded.entries) {
             _votersList[entry.key] =
                 List<Map<String, dynamic>>.from(entry.value);
@@ -2930,17 +2963,21 @@ class AppCache {
     unawaited(Future<void>(() async {
       try {
         final prefs = await SharedPreferences.getInstance();
-        final data = prefs.getString('cached_messages');
+        final data = prefs.getString('app_cache_data');
         if (data != null) {
-          final Map<String, dynamic> decoded = jsonDecode(data);
-          for (var entry in decoded.entries) {
-            _cachedMessages[entry.key] =
-                List<Map<String, dynamic>>.from(entry.value);
-          }
-          if (kDebugMode) {
-            developer.log(
-                '📦 Lazy loaded ${_cachedMessages.length} message groups',
-                name: 'AppCache');
+          final decoded = await JsonWorker.decodeMap(data);
+          final messagesJson =
+              decoded['cached_messages'] as Map<String, dynamic>?;
+          if (messagesJson != null) {
+            for (var entry in messagesJson.entries) {
+              _cachedMessages[entry.key] =
+                  List<Map<String, dynamic>>.from(entry.value);
+            }
+            if (kDebugMode) {
+              developer.log(
+                  '📦 Lazy loaded ${_cachedMessages.length} message groups',
+                  name: 'AppCache');
+            }
           }
         }
       } catch (e) {
@@ -2950,7 +2987,7 @@ class AppCache {
   }
 
   // ==========================================================================
-  // REFRESH HISTORY GAMES - Legacy method kept for compatibility
+  // REFRESH HISTORY GAMES
   // ==========================================================================
   static Future<void> refreshHistoryGames({String? authToken}) async {
     try {
@@ -2984,6 +3021,7 @@ class AppCache {
 
         historyGames = gamesData
             .map((g) => HistoryGame.fromJson(g as Map<String, dynamic>))
+            .take(_maxHistoryGames)
             .toList();
 
         await _saveHistoryGamesToDisk(historyGames);
@@ -3018,7 +3056,8 @@ class AppCache {
     try {
       final prefs = await SharedPreferences.getInstance();
       final jsonList = games.map((g) => g.toJson()).toList();
-      await prefs.setString('history_games_cache', jsonEncode(jsonList));
+      final encoded = await JsonWorker.encodeToJson(jsonList);
+      await prefs.setString('history_games_cache', encoded);
       await prefs.setInt('history_games_timestamp',
           DateTime.now().millisecondsSinceEpoch ~/ 1000);
     } catch (e) {
@@ -3034,6 +3073,7 @@ class AppCache {
       final List<dynamic> jsonList = jsonDecode(jsonStr);
       return jsonList
           .map((g) => HistoryGame.fromJson(g as Map<String, dynamic>))
+          .take(_maxHistoryGames)
           .toList();
     } catch (e) {
       return null;
@@ -3068,7 +3108,8 @@ class AppCache {
       return msg;
     }).toList();
 
-    _cachedMessages[key] = processedMessages;
+    _cachedMessages[key] =
+        processedMessages.take(_maxMessagesPerFixture).toList();
     _saveMessagesToDisk();
     if (kDebugMode) {
       developer.log('💾 Cached ${processedMessages.length} messages for $key',
@@ -3119,7 +3160,7 @@ class AppCache {
             })
         .toList();
 
-    _cachedMessages[key] = messagesMap;
+    _cachedMessages[key] = messagesMap.take(_maxMessagesPerFixture).toList();
     await _saveMessagesToDisk();
   }
 
@@ -3127,7 +3168,8 @@ class AppCache {
     try {
       final prefs = await SharedPreferences.getInstance();
       final serialized = Map<String, dynamic>.from(_cachedMessages);
-      await prefs.setString('cached_messages', json.encode(serialized));
+      final encoded = await JsonWorker.encodeToJson(serialized);
+      await prefs.setString('cached_messages', encoded);
     } catch (e) {
       developer.log('⚠️ Failed to save messages to disk: $e', name: 'AppCache');
     }
@@ -3206,10 +3248,8 @@ class AppCache {
 
   static Future<void> _saveChannelStatsToDisk() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      'cached_channel_stats',
-      json.encode(_cachedChannelStats),
-    );
+    final encoded = await JsonWorker.encodeToJson(_cachedChannelStats);
+    await prefs.setString('cached_channel_stats', encoded);
   }
 
   static void cacheChannelMembers(
@@ -3222,10 +3262,8 @@ class AppCache {
 
   static Future<void> _saveChannelMembersToDisk() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      'cached_channel_members',
-      json.encode(_cachedChannelMembers),
-    );
+    final encoded = await JsonWorker.encodeToJson(_cachedChannelMembers);
+    await prefs.setString('cached_channel_members', encoded);
   }
 
   // ==========================================================================
@@ -3238,7 +3276,8 @@ class AppCache {
 
   static Future<void> _saveLineupsToDisk() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('cached_lineups', json.encode(_cachedLineups));
+    final encoded = await JsonWorker.encodeToJson(_cachedLineups);
+    await prefs.setString('cached_lineups', encoded);
   }
 
   // ==========================================================================
@@ -3254,10 +3293,8 @@ class AppCache {
 
   static Future<void> _saveComradeLeaderboardToDisk() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      'cached_comrade_leaderboard',
-      json.encode(_cachedComradeLeaderboard),
-    );
+    final encoded = await JsonWorker.encodeToJson(_cachedComradeLeaderboard);
+    await prefs.setString('cached_comrade_leaderboard', encoded);
   }
 
   static void cacheComradeVotersData(
@@ -3270,10 +3307,8 @@ class AppCache {
 
   static Future<void> _saveComradeVotersDataToDisk() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      'cached_comrade_voters_data',
-      json.encode(_cachedComradeVotersData),
-    );
+    final encoded = await JsonWorker.encodeToJson(_cachedComradeVotersData);
+    await prefs.setString('cached_comrade_voters_data', encoded);
   }
 
   // ==========================================================================
@@ -3303,7 +3338,8 @@ class AppCache {
         'unreadCounts': entry.value.unreadCounts,
       };
     }
-    await prefs.setString('channel_fixtures_cache', json.encode(serialized));
+    final encoded = await JsonWorker.encodeToJson(serialized);
+    await prefs.setString('channel_fixtures_cache', encoded);
   }
 
   static Future<void> saveProfile(Map<String, dynamic> newProfile) async {
@@ -3316,29 +3352,26 @@ class AppCache {
     };
     profile = enrichedProfile;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('cached_profile', json.encode(enrichedProfile));
+    final encoded = await JsonWorker.encodeToJson(enrichedProfile);
+    await prefs.setString('cached_profile', encoded);
   }
 
   static Future<void> saveChannels(List<UserChannel> newChannels) async {
     channels = newChannels;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      'cached_channels',
-      json.encode(channels.map((c) => c.toJson()).toList()),
-    );
+    final encoded =
+        await JsonWorker.encodeToJson(channels.map((c) => c.toJson()).toList());
+    await prefs.setString('cached_channels', encoded);
   }
 
-    static Future<void> saveVoteCount(String fixtureId, int count) async {
+  static Future<void> saveVoteCount(String fixtureId, int count) async {
     _voteCounts[fixtureId] = count;
 
-    // ✅ CHANGED — was an immediate read→decode→merge→encode→write against
-    // disk every call. _voteCounts is already correct in memory, so the
-    // debounced flush just serializes it directly. Calls for different
-    // fixtures inside the same debounce window collapse into one write.
     DiskWriteScheduler.schedule('vote_counts_cache', () async {
       try {
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('vote_counts_cache', json.encode(_voteCounts));
+        final encoded = await JsonWorker.encodeToJson(_voteCounts);
+        await prefs.setString('vote_counts_cache', encoded);
         if (kDebugMode) {
           developer.log('💾 Flushed ${_voteCounts.length} vote counts',
               name: 'AppCache');
@@ -3355,8 +3388,8 @@ class AppCache {
     DiskWriteScheduler.schedule('comment_counts_cache', () async {
       try {
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(
-            'comment_counts_cache', json.encode(_commentCounts));
+        final encoded = await JsonWorker.encodeToJson(_commentCounts);
+        await prefs.setString('comment_counts_cache', encoded);
         if (kDebugMode) {
           developer.log('💾 Flushed ${_commentCounts.length} comment counts',
               name: 'AppCache');
@@ -3373,7 +3406,8 @@ class AppCache {
     DiskWriteScheduler.schedule('like_counts_cache', () async {
       try {
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('like_counts_cache', json.encode(_likeCounts));
+        final encoded = await JsonWorker.encodeToJson(_likeCounts);
+        await prefs.setString('like_counts_cache', encoded);
         if (kDebugMode) {
           developer.log('💾 Flushed ${_likeCounts.length} like counts',
               name: 'AppCache');
@@ -3390,8 +3424,8 @@ class AppCache {
     DiskWriteScheduler.schedule('unread_counts_cache', () async {
       try {
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(
-            'unread_counts_cache', json.encode(_unreadCounts));
+        final encoded = await JsonWorker.encodeToJson(_unreadCounts);
+        await prefs.setString('unread_counts_cache', encoded);
         if (kDebugMode) {
           developer.log('💾 Flushed ${_unreadCounts.length} unread counts',
               name: 'AppCache');
@@ -3403,14 +3437,11 @@ class AppCache {
   }
 
   static Future<void> saveUserVotes() async {
-    // ✅ CHANGED — debounced. setUserVote()/applyUpdate() can both call
-    // this back-to-back for rapid vote changes; this collapses that into
-    // one write. Returns before the actual disk write completes, matching
-    // how every existing call site already treats this as fire-and-forget.
     DiskWriteScheduler.schedule('cached_user_votes', () async {
       try {
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('cached_user_votes', jsonEncode(userVotes));
+        final encoded = await JsonWorker.encodeToJson(userVotes);
+        await prefs.setString('cached_user_votes', encoded);
         if (kDebugMode) {
           developer.log('💾 AppCache: Saved ${userVotes.length} user votes',
               name: 'AppCache');
@@ -3431,42 +3462,33 @@ class AppCache {
     for (var entry in voters.entries) {
       serialized[entry.key] = entry.value.map((c) => c.toJson()).toList();
     }
-    await prefs.setString('cached_comrade_voters', json.encode(serialized));
+    final encoded = await JsonWorker.encodeToJson(serialized);
+    await prefs.setString('cached_comrade_voters', encoded);
   }
 
   // ==========================================================================
   // MEMORY MANAGEMENT - TRIM METHODS
   // ==========================================================================
   static void reduceMemoryFootprint() {
-    // Keep only active fixture data
     final activeFixtureId = getActiveFixtureId();
     if (activeFixtureId != null) {
       final keysToKeep = {activeFixtureId};
 
-      // Trim channel fixtures
       channelFixtures.removeWhere((key, _) => !keysToKeep.contains(key));
-
-      // Trim vote counts
       _voteCounts.removeWhere((key, _) => !keysToKeep.contains(key));
-
-      // Trim comment counts
       _commentCounts.removeWhere((key, _) => !keysToKeep.contains(key));
-
-      // Trim latest comments
       _latestComments.removeWhere((key, _) => !keysToKeep.contains(key));
       _latestCommentAuthors.removeWhere((key, _) => !keysToKeep.contains(key));
       _latestCommentTimestamps
           .removeWhere((key, _) => !keysToKeep.contains(key));
-
-      // Trim per-channel vote counts
       perChannelVoteCounts.removeWhere((key, _) => !keysToKeep.contains(key));
     }
 
-    // Trim message cache to 10 messages per fixture
+    // Trim message cache
     for (var key in _cachedMessages.keys.toList()) {
       final messages = _cachedMessages[key];
-      if (messages != null && messages.length > 10) {
-        _cachedMessages[key] = messages.take(10).toList();
+      if (messages != null && messages.length > _maxMessagesPerFixture) {
+        _cachedMessages[key] = messages.take(_maxMessagesPerFixture).toList();
       }
     }
 
@@ -3490,14 +3512,15 @@ class AppCache {
   static Future<void> _saveAllToDisk() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      final data = <String, dynamic>{};
 
-      // Save trimmed data
-      await prefs.setString('cached_messages', json.encode(_cachedMessages));
-      await prefs.setString(
-          'channel_fixtures_cache', json.encode(channelFixtures));
-      await prefs.setString('vote_counts_cache', json.encode(_voteCounts));
-      await prefs.setString(
-          'comment_counts_cache', json.encode(_commentCounts));
+      data['cached_messages'] = _cachedMessages;
+      data['channel_fixtures_cache'] = channelFixtures;
+      data['vote_counts_cache'] = _voteCounts;
+      data['comment_counts_cache'] = _commentCounts;
+
+      final encoded = await JsonWorker.encodeToJson(data);
+      await prefs.setString('app_cache_data', encoded);
 
       if (kDebugMode) {
         developer.log('💾 AppCache saved to disk after trim', name: 'AppCache');
@@ -3508,13 +3531,12 @@ class AppCache {
   }
 
   // ==========================================================================
-  // CLEAR ALL CACHE - UPDATED WITH HISTORY COMMENTS
+  // CLEAR ALL CACHE
   // ==========================================================================
   static Future<void> clear() async {
     try {
       final prefs = await SharedPreferences.getInstance();
 
-      // Remove all cache keys
       await prefs.remove('cached_comrades');
       await prefs.remove('post_comments_cache');
       await prefs.remove('cached_channels');
@@ -3543,12 +3565,10 @@ class AppCache {
       await prefs.remove('history_games_cache');
       await prefs.remove('history_games_timestamp');
       await prefs.remove('aftermatch_data_cache');
-
-      // Clear history comments
       await prefs.remove('history_comments_cache');
       await prefs.remove('history_comments_timestamps');
+      await prefs.remove('app_cache_data');
 
-      // Clear all in-memory data
       comrades.clear();
       channels.clear();
       profile = null;
@@ -3584,8 +3604,6 @@ class AppCache {
       _lastBetUpdate.clear();
       _lastUnreadUpdate.clear();
       _aftermatchData.clear();
-
-      // Clear history comments
       _historyComments.clear();
       _historyCommentsLoaded = false;
       _historyCommentFetchTime.clear();
@@ -3952,7 +3970,6 @@ Future<void> initializeFCMWeb() async {
     }
 
     debugPrint('FCM DEBUG: about to call getToken()');
-    // Web requires the VAPID key to get a token.
     final token = await FirebaseMessaging.instance.getToken(
       vapidKey:
           'BIvcsdfnoQ07A2PAEiXvHfjLPOfyga-fiPB-JLJfdr7NbXxwWJMr6fNT-71RzUVP-WZcL76W_sN137Fs9wMhi90',
@@ -3997,7 +4014,6 @@ Future<void> initializeFCMWeb() async {
       }
     });
 
-    // Foreground messages — tab is open and focused.
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       debugPrint('FCM DEBUG: onMessage (foreground) fired');
       developer.log('🔔 Foreground FCM message (web)', name: 'Funzypp');
@@ -4212,15 +4228,10 @@ void _loadHeavyDataInBackground() {
 // ============================================================================
 Future<void> main() async {
   final widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
-   if (!kIsWeb) {
-    MobileAds.instance.initialize(); // fire-and-forget, not awaited
+  if (!kIsWeb) {
+    MobileAds.instance.initialize();
   }
 
-  // ✅ Only hold the native splash artificially on the very first launch.
-  // The OS-level splash image still flashes briefly on every cold start
-  // (that's unavoidable — it's drawn before Flutter code runs at all).
-  // What we control here is whether we keep it on screen through init,
-  // or let it disappear the instant the engine hands off to Flutter.
   final splashPrefs = await SharedPreferences.getInstance();
   final isFirstLaunch = !(splashPrefs.getBool('has_launched_before') ?? false);
 
@@ -4230,18 +4241,11 @@ Future<void> main() async {
 
   final sw = Stopwatch()..start();
 
-  // ✅ AWAITED — nothing that touches Firebase (FirebaseMessaging.instance,
-  // FirebaseAuth, etc.) is safe to call until this has actually completed.
-  // Racing it caused an intermittent JS/Dart interop TypeError inside
-  // requestPermission() on web.
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
   authService = AuthService();
-  // ✅ Awaited so isLoggedIn/userId are reliably known before
-  // HomePage.initState() and initializeFCM() both check them. This is a
-  // fast SharedPreferences read, not a network call.
   await authService.initialize();
 
   await AppCache.loadFixturesInstantly();
@@ -4253,20 +4257,17 @@ Future<void> main() async {
 
   developer.log('⏱ runApp called at ${sw.elapsedMilliseconds}ms',
       name: 'Funzypp');
-     if (kIsWeb) {
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    try {
-      onFunspotAppReady();
-    } catch (_) {
-      // not defined on this page (e.g. index.html) — ignore
-    }
-  });
-}
-  
 
-  // ✅ Only remove a splash we actually preserved. On repeat launches
-  // there's nothing being held, so this block is skipped entirely and
-  // the native splash is released by the engine as soon as it's ready.
+  if (kIsWeb) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      try {
+        onFunspotAppReady();
+      } catch (_) {
+        // not defined on this page
+      }
+    });
+  }
+
   if (isFirstLaunch) {
     await splashPrefs.setBool('has_launched_before', true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -4280,9 +4281,6 @@ Future<void> main() async {
 
   Future.delayed(const Duration(seconds: 3), () => AppCache.refreshAll());
 
-  // ✅ Platform-specific push init: web uses VAPID + service worker +
-  // browser Notification API; mobile uses FCM's native background handler
-  // + flutter_local_notifications for foreground display.
   unawaited(() async {
     try {
       await initializeDeepLinks();
@@ -4307,6 +4305,7 @@ Future<void> main() async {
         name: 'Funzypp', error: details.exception);
   };
 }
+
 Future<bool> _hasNotificationPermission() async {
   if (kIsWeb) {
     return WebNotificationService.getPermissionStatus() == 'granted';
@@ -4372,7 +4371,7 @@ class _FunzyppState extends State<Funzypp> with WidgetsBindingObserver {
     super.dispose();
   }
 
-    @override
+  @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     switch (state) {
       case AppLifecycleState.resumed:
@@ -4406,10 +4405,6 @@ class _FunzyppState extends State<Funzypp> with WidgetsBindingObserver {
           stopAppCacheRefresh();
         });
 
-        // ✅ NEW — flush every pending debounced write immediately. Without
-        // this, a write scheduled just before the tab backgrounds/closes
-        // (web) or the process dies (mobile) could be lost waiting out a
-        // timer that may never fire.
         unawaited(DiskWriteScheduler.flushAll());
         break;
 
@@ -4462,7 +4457,7 @@ class _FunzyppState extends State<Funzypp> with WidgetsBindingObserver {
     final hasPermission = await _hasNotificationPermission();
     if (!hasPermission) {
       _showNotificationGateDialog();
-      return; // login modal never opens until this resolves
+      return;
     }
 
     _openLoginModal();
@@ -4508,10 +4503,10 @@ class _FunzyppState extends State<Funzypp> with WidgetsBindingObserver {
 
     showDialog(
       context: context,
-      barrierDismissible: false, // can't tap outside to skip it
+      barrierDismissible: false,
       builder: (dialogContext) => StatefulBuilder(
         builder: (ctx, setD) => PopScope(
-          canPop: false, // can't back-button out of it either
+          canPop: false,
           child: AlertDialog(
             backgroundColor: FanColors.surface,
             shape: RoundedRectangleBorder(
@@ -4549,7 +4544,7 @@ class _FunzyppState extends State<Funzypp> with WidgetsBindingObserver {
                         setD(() => requesting = true);
 
                         final granted = isBlocked
-                            ? await _hasNotificationPermission() // re-check after they fixed it in settings
+                            ? await _hasNotificationPermission()
                             : await _requestNotificationPermission();
 
                         if (granted) {
