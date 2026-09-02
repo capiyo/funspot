@@ -32,6 +32,10 @@ import 'models/aftermatch_models.dart';
 import 'modals/login_modal.dart';
 import './pages/fan_Funzy_design.dart';
 import 'models/user_channel.dart';
+import 'dart:js_interop';
+
+@JS('onFunspotAppReady')
+external void onFunspotAppReady();
 
 // ============================================================================
 // GLOBAL KEYS
@@ -4249,6 +4253,16 @@ Future<void> main() async {
 
   developer.log('⏱ runApp called at ${sw.elapsedMilliseconds}ms',
       name: 'Funzypp');
+     if (kIsWeb) {
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    try {
+      onFunspotAppReady();
+    } catch (_) {
+      // not defined on this page (e.g. index.html) — ignore
+    }
+  });
+}
+  
 
   // ✅ Only remove a splash we actually preserved. On repeat launches
   // there's nothing being held, so this block is skipped entirely and

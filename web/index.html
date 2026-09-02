@@ -37,6 +37,13 @@
 
   <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport">
 
+  <!-- Fonts used by the FanFunzy design system (SairaCondensed for headings, DM Sans for body) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Saira+Condensed:wght@600;700;800&display=swap"
+    rel="stylesheet">
+
   <style id="app-loading-style">
     html {
       height: 100%
@@ -50,7 +57,7 @@
 
     @media (prefers-color-scheme: dark) {
       body {
-        background-color: #121A30;
+        background-color: #0F1E27;
       }
     }
 
@@ -58,6 +65,164 @@
        Flutter calls hideSeoContent() from Dart after its first frame. */
     #seo-content.app-ready {
       display: none;
+    }
+
+    /* ── FanFunzy tokens, light (default) ── */
+    #seo-content {
+      --fs-bg: #FFFFFF;
+      --fs-bg-tint: #F5F8FA;
+      --fs-surface: #FFFFFF;
+      --fs-border: #DDE5EA;
+      --fs-border-active: #BFD0D9;
+      --fs-primary: #1F4255;
+      --fs-primary-dark: #14303E;
+      --fs-primary-muted: #E3EBEF;
+      --fs-secondary: #FFD9BD;
+      --fs-secondary-dim: #FFF3EA;
+      --fs-gold: #C79000;
+      --fs-gold-dim: #FFF6E0;
+      --fs-red: #D93025;
+      --fs-text-primary: #16232B;
+      --fs-text-secondary: #55707D;
+      --fs-text-tertiary: #96A8B0;
+      --fs-text-inverse: #FFFFFF;
+      --fs-shadow: 0 4px 16px rgba(20, 36, 48, 0.08);
+    }
+
+    /* ── FanFunzy tokens, dark (flat surfaces, per design system v6.0) ── */
+    @media (prefers-color-scheme: dark) {
+      #seo-content {
+        --fs-bg: #0F1E27;
+        --fs-bg-tint: #0F1E27;
+        --fs-surface: #0F1E27;
+        --fs-border: #1D3542;
+        --fs-border-active: #2E4E5E;
+        --fs-primary: #4FA3D1;
+        --fs-primary-dark: #2E6E96;
+        --fs-primary-muted: #16303E;
+        --fs-secondary: #FF7A29;
+        --fs-secondary-dim: #3A2414;
+        --fs-gold: #FFC53D;
+        --fs-gold-dim: #352A0C;
+        --fs-red: #FF5A45;
+        --fs-text-primary: #F2F6F8;
+        --fs-text-secondary: #A9BAC4;
+        --fs-text-tertiary: #6E8492;
+        --fs-text-inverse: #FFFFFF;
+        --fs-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+      }
+    }
+
+    #seo-content {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 48px 24px 64px;
+      font-family: 'DM Sans', sans-serif;
+      color: var(--fs-text-primary);
+      background: var(--fs-bg);
+    }
+
+    #seo-content .fs-eyebrow {
+      display: inline-block;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.4px;
+      text-transform: uppercase;
+      color: var(--fs-text-tertiary);
+      margin-bottom: 12px;
+    }
+
+    #seo-content h1 {
+      font-family: 'Saira Condensed', sans-serif;
+      font-weight: 800;
+      font-size: 40px;
+      letter-spacing: -0.5px;
+      line-height: 1.05;
+      margin: 0 0 16px;
+      color: var(--fs-text-primary);
+    }
+
+    #seo-content .fs-lede {
+      font-size: 16px;
+      line-height: 1.6;
+      color: var(--fs-text-secondary);
+      margin: 0 0 40px;
+      max-width: 56ch;
+    }
+
+    #seo-content h2 {
+      font-family: 'Saira Condensed', sans-serif;
+      font-weight: 700;
+      font-size: 24px;
+      letter-spacing: 0.2px;
+      color: var(--fs-text-primary);
+      margin: 0 0 20px;
+    }
+
+    #seo-content .fs-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 14px;
+      list-style: none;
+      margin: 0 0 40px;
+      padding: 0;
+    }
+
+    #seo-content .fs-card {
+      background: var(--fs-surface);
+      border: 1px solid var(--fs-border);
+      border-radius: 14px;
+      padding: 18px;
+      box-shadow: var(--fs-shadow);
+    }
+
+    #seo-content .fs-card .fs-card-title {
+      font-family: 'DM Sans', sans-serif;
+      font-weight: 700;
+      font-size: 15px;
+      color: var(--fs-primary);
+      margin: 0 0 6px;
+    }
+
+    #seo-content .fs-card p {
+      margin: 0;
+      font-size: 13.5px;
+      line-height: 1.55;
+      color: var(--fs-text-secondary);
+    }
+
+    #seo-content .fs-body {
+      font-size: 14px;
+      line-height: 1.6;
+      color: var(--fs-text-secondary);
+      margin: 0 0 40px;
+      max-width: 60ch;
+    }
+
+    #seo-content nav.fs-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding-top: 24px;
+      border-top: 1px solid var(--fs-border);
+    }
+
+    #seo-content nav.fs-links a {
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--fs-primary);
+      text-decoration: none;
+      padding: 8px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--fs-border-active);
+      background: var(--fs-primary-muted);
+      transition: opacity 0.15s ease;
+    }
+
+    #seo-content nav.fs-links a:hover {
+      opacity: 0.75;
     }
   </style>
   <script id="app-loading-script">
@@ -74,35 +239,45 @@
        hideSeoContent() once it mounts. Keep this real, readable text —
        not just a loading spinner — since this is the only thing a
        crawler bot will ever see on this URL. -->
-  <div id="seo-content" style="max-width:640px;margin:0 auto;padding:32px 20px;font-family:sans-serif;color:#0D0B1E;">
-    <h1>Funspot — Live Football Fan Arena</h1>
-    <p>
+  <div id="seo-content">
+    <span class="fs-eyebrow">Live Football Fan Arena</span>
+    <h1>Funspot</h1>
+    <p class="fs-lede">
       Funspot is a live football fan engagement app. Join channel-based
       voting on real fixtures, chat live with other fans during matches,
       and climb the leaderboard every season.
     </p>
+
     <h2>What you can do on Funspot</h2>
-    <ul>
-      <li><strong>Arena</strong> — vote on upcoming and live fixtures, joinf
-        channels with other fans, and chat during matches.</li>
-      <li><strong>Feed</strong> — share photos and video with the community
-        and follow other fans' posts.</li>
-      <li><strong>History</strong> — browse settled fixtures, past results,
-        and channel leaderboards from previous seasons.</li>
+    <ul class="fs-cards">
+      <li class="fs-card">
+        <p class="fs-card-title">Arena</p>
+        <p>Vote on upcoming and live fixtures, join channels with other fans, and chat during matches.</p>
+      </li>
+      <li class="fs-card">
+        <p class="fs-card-title">Feed</p>
+        <p>Share photos and video with the community and follow other fans' posts.</p>
+      </li>
+      <li class="fs-card">
+        <p class="fs-card-title">History</p>
+        <p>Browse settled fixtures, past results, and channel leaderboards from previous seasons.</p>
+      </li>
     </ul>
-    <p>
+
+    <p class="fs-body">
       Funspot channels are built around real football fixtures across
       major leagues, with live commentary and sub-fixture markets
       (first to score, first corner, first yellow card, and more) that
       fans can vote and chat about together.
     </p>
-    <p>
-      <a href="/fixtures/">Fixtures</a> ·
-      <a href="/results/">Results</a> ·
-      <a href="/about/">About</a> ·
-      <a href="/privacy/">Privacy Policy</a> ·
+
+    <nav class="fs-links">
+      <a href="/fixtures/">Fixtures</a>
+      <a href="/results/">Results</a>
+      <a href="/about/">About</a>
+      <a href="/privacy/">Privacy Policy</a>
       <a href="/contact/">Contact</a>
-    </p>
+    </nav>
   </div>
 
   <!-- Firebase Phone Auth reCAPTCHA container (web only) -->

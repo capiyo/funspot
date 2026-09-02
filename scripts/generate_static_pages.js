@@ -4,6 +4,13 @@
 // and writes them into build/web/, alongside the Flutter app's index.html.
 // Runs as a build step AFTER `flutter build web` (see netlify build command).
 //
+// Each generated page shows real static content to crawlers (and to users
+// for the first paint), then hides that content and hands off to the
+// Flutter app the instant it mounts — the same pattern already used on
+// index.html for #seo-content. This is NOT user-agent cloaking: every
+// visitor (bot or human) receives identical HTML; only client-side JS,
+// running after the page is already delivered, decides what stays visible.
+//
 // Node 24.x has fetch and fs.promises built in — no dependencies needed.
 
 const fs = require('fs');
@@ -17,15 +24,21 @@ const CONTACT_PHONE = '+254 704 306 867';
 const LAST_UPDATED = new Date().toISOString().slice(0, 10);
 
 function escapeHtml(str) {
-    return String(str ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
-function pageShell({ title, description, canonicalPath, bodyHtml }) {
-    return `<!DOCTYPE html>
+// canonicalPath is also used as the in-app route Flutter should navigate
+// to once it takes over, so real users land in the live app screen instead
+// of staying on a dead static page. Pass appRoute to override if the
+// in-app route differs from the URL path (e.g. /fixtures/ -> /arena).
+function pageShell({ title, description, canonicalPath, appRoute, bodyHtml }) {
+  const route = appRoute || canonicalPath;
+
+  return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -35,110 +48,148 @@ function pageShell({ title, description, canonicalPath, bodyHtml }) {
 <link rel="canonical" href="${SITE_URL}${canonicalPath}">
 <link rel="icon" type="image/png" href="/funspot.png">
 <style>
-  body{font-family:sans-serif;max-width:720px;margin:0 auto;padding:24px 20px;color:#0D0B1E;line-height:1.5;}
+  html{height:100%}
+  body{margin:0;min-height:100%;font-family:sans-serif;color:#0D0B1E;line-height:1.5;background-color:#FFFFFF;}
+  @media (prefers-color-scheme: dark) { body{background-color:#121A30;color:#EDEBFA;} }
+
+  #static-fallback{max-width:720px;margin:0 auto;padding:24px 20px;}
+  #static-fallback.app-ready{display:none;}
+
   h1{font-size:22px;} h2{font-size:16px;margin-top:28px;}
-  a{color:#0D0B1E;text-decoration:none;}
-  .match{border-bottom:1px solid #eee;padding:10px 0;display:flex;justify-content:space-between;gap:12px;}
+  a{color:inherit;text-decoration:none;}
+  .match{border-bottom:1px solid rgba(128,128,128,0.25);padding:10px 0;display:flex;justify-content:space-between;gap:12px;}
   .teams{font-weight:600;}
-  .meta{color:#666;font-size:13px;}
-  nav a{margin-right:16px;font-size:13px;color:#666;}
-section{margin-top:24px;}
+  .meta{color:#888;font-size:13px;}
+  nav a{margin-right:16px;font-size:13px;color:#888;}
+  section{margin-top:24px;}
 </style>
+<script id="static-fallback-script">
+  // Called by Flutter (from Dart, on first frame) once the real app has
+  // mounted. Hides the static SEO/content shell and, for a direct/fresh
+  // page load, sends the user into the equivalent in-app screen so they
+  // never get stuck looking at static markup.
+  function hideStaticFallback() {
+    var el = document.getElementById('static-fallback');
+    if (el) { el.classList.add('app-ready'); }
+  }
+
+  // Optional: if Flutter exposes a router bridge (e.g. window.funspotRouter
+  // set up in your Dart bootstrap), call it so the user lands on the live
+  // screen for this route rather than the app's default start screen.
+  function routeIntoApp() {
+    if (window.funspotRouter && typeof window.funspotRouter.go === 'function') {
+      window.funspotRouter.go(${JSON.stringify(route)});
+    }
+  }
+
+  function onFunspotAppReady() {
+    hideStaticFallback();
+    routeIntoApp();
+  }
+</script>
 </head>
 <body>
+
+<div id="static-fallback">
 <nav><a href="/">Home</a><a href="/fixtures/">Fixtures</a><a href="/results/">Results</a><a href="/privacy/">Privacy</a><a href="/about/">About</a><a href="/contact/">Contact</a></nav>
 ${bodyHtml}
+</div>
+
+<!-- Firebase Phone Auth reCAPTCHA container (web only) -->
+<div id="recaptcha-container"></div>
+
+<script src="flutter_bootstrap.js" async=""></script>
 </body>
 </html>`;
 }
 
 async function fetchJson(url) {
-    try {
-        const res = await fetch(url, { headers: { 'Content-Type': 'application/json' } });
-        if (!res.ok) {
-            console.warn(`⚠️  ${url} returned ${res.status}, skipping`);
-            return null;
-        }
-        return await res.json();
-    } catch (e) {
-        console.warn(`⚠️  Failed to fetch ${url}: ${e.message}`);
-        return null;
+  try {
+    const res = await fetch(url, { headers: { 'Content-Type': 'application/json' } });
+    if (!res.ok) {
+      console.warn(`⚠️  ${url} returned ${res.status}, skipping`);
+      return null;
     }
+    return await res.json();
+  } catch (e) {
+    console.warn(`⚠️  Failed to fetch ${url}: ${e.message}`);
+    return null;
+  }
 }
 
 function writeFile(relPath, content) {
-    const fullPath = path.join(OUT_DIR, relPath);
-    fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-    fs.writeFileSync(fullPath, content, 'utf8');
-    console.log(`✅ wrote ${relPath}`);
+  const fullPath = path.join(OUT_DIR, relPath);
+  fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+  fs.writeFileSync(fullPath, content, 'utf8');
+  console.log(`✅ wrote ${relPath}`);
 }
 
 async function buildFixturesPage() {
-    const data = await fetchJson(`${API_BASE}/games`);
-    const fixtures = (data && (data.data || data.fixtures)) || [];
+  const data = await fetchJson(`${API_BASE}/games`);
+  const fixtures = (data && (data.data || data.fixtures)) || [];
 
-    const rows = fixtures.slice(0, 60).map(f => {
-        const home = f.homeTeam || f.home_team || 'TBD';
-        const away = f.awayTeam || f.away_team || 'TBD';
-        const league = f.league || '';
-        const kickoff = f.kickoffTime || f.kickoff_time || f.matchDate || '';
-        return `<div class="match">
+  const rows = fixtures.slice(0, 60).map(f => {
+    const home = f.homeTeam || f.home_team || 'TBD';
+    const away = f.awayTeam || f.away_team || 'TBD';
+    const league = f.league || '';
+    const kickoff = f.kickoffTime || f.kickoff_time || f.matchDate || '';
+    return `<div class="match">
       <div><div class="teams">${escapeHtml(home)} vs ${escapeHtml(away)}</div>
       <div class="meta">${escapeHtml(league)}</div></div>
       <div class="meta">${escapeHtml(kickoff)}</div>
     </div>`;
-    }).join('\n');
+  }).join('\n');
 
-    const body = `
+  const body = `
 <h1>Upcoming Football Fixtures — Funspot</h1>
 <p>Vote and chat live on real football fixtures across major leagues.
 Join a channel on the <a href="/">Funspot app</a> to take part.</p>
 ${rows || '<p>No upcoming fixtures right now — check back soon.</p>'}
 `;
 
-    writeFile('fixtures/index.html', pageShell({
-        title: 'Upcoming Fixtures — Funspot',
-        description: 'Upcoming football fixtures fans are voting and chatting about on Funspot.',
-        canonicalPath: '/fixtures/',
-        bodyHtml: body,
-    }));
+  writeFile('fixtures/index.html', pageShell({
+    title: 'Upcoming Fixtures — Funspot',
+    description: 'Upcoming football fixtures fans are voting and chatting about on Funspot.',
+    canonicalPath: '/fixtures/',
+    bodyHtml: body,
+  }));
 
-    return fixtures;
+  return fixtures;
 }
 
 async function buildResultsPage() {
-    const data = await fetchJson(`${API_BASE}/games/history?limit=60`);
-    const games = (data && data.data) || [];
+  const data = await fetchJson(`${API_BASE}/games/history?limit=60`);
+  const games = (data && data.data) || [];
 
-    const rows = games.map(g => {
-        const home = g.homeTeam || g.home_team || 'TBD';
-        const away = g.awayTeam || g.away_team || 'TBD';
-        const hs = g.homeScore ?? g.home_score ?? '-';
-        const as = g.awayScore ?? g.away_score ?? '-';
-        const league = g.league || '';
-        return `<div class="match">
+  const rows = games.map(g => {
+    const home = g.homeTeam || g.home_team || 'TBD';
+    const away = g.awayTeam || g.away_team || 'TBD';
+    const hs = g.homeScore ?? g.home_score ?? '-';
+    const as = g.awayScore ?? g.away_score ?? '-';
+    const league = g.league || '';
+    return `<div class="match">
       <div><div class="teams">${escapeHtml(home)} ${hs} - ${as} ${escapeHtml(away)}</div>
       <div class="meta">${escapeHtml(league)}</div></div>
     </div>`;
-    }).join('\n');
+  }).join('\n');
 
-    const body = `
+  const body = `
 <h1>Recent Results — Funspot</h1>
 <p>Recent match results from channels on Funspot. Join the conversation on
 the <a href="/">Funspot app</a>.</p>
 ${rows || '<p>No results yet.</p>'}
 `;
 
-    writeFile('results/index.html', pageShell({
-        title: 'Recent Results — Funspot',
-        description: 'Recent football results discussed and voted on by Funspot fans.',
-        canonicalPath: '/results/',
-        bodyHtml: body,
-    }));
+  writeFile('results/index.html', pageShell({
+    title: 'Recent Results — Funspot',
+    description: 'Recent football results discussed and voted on by Funspot fans.',
+    canonicalPath: '/results/',
+    bodyHtml: body,
+  }));
 }
 
 function buildAboutPage() {
-    const body = `
+  const body = `
 <h1>About Funspot</h1>
 <p>Funspot is a live football fan engagement app built for supporters who
 want more than just the final score. Fans join channels around real
@@ -161,16 +212,16 @@ other's activity through the season.</p>
 Nairobi, Kenya. You can reach us any time via the
 <a href="/contact/">contact page</a>.</p>
 `;
-    writeFile('about/index.html', pageShell({
-        title: 'About — Funspot',
-        description: 'About Funspot, a live football fan engagement app for channel-based voting, live match chat, and leaderboards.',
-        canonicalPath: '/about/',
-        bodyHtml: body,
-    }));
+  writeFile('about/index.html', pageShell({
+    title: 'About — Funspot',
+    description: 'About Funspot, a live football fan engagement app for channel-based voting, live match chat, and leaderboards.',
+    canonicalPath: '/about/',
+    bodyHtml: body,
+  }));
 }
 
 function buildContactPage() {
-    const body = `
+  const body = `
 <h1>Contact Funspot</h1>
 <p>Questions, feedback, or an issue with the app? Reach out any time.</p>
 <section>
@@ -185,16 +236,16 @@ function buildContactPage() {
 photo/video content concerns), please include your Funspot username or
 phone number used to sign up so we can look into it faster.</p>
 `;
-    writeFile('contact/index.html', pageShell({
-        title: 'Contact — Funspot',
-        description: 'Contact the Funspot team by email or phone for support, feedback, or account issues.',
-        canonicalPath: '/contact/',
-        bodyHtml: body,
-    }));
+  writeFile('contact/index.html', pageShell({
+    title: 'Contact — Funspot',
+    description: 'Contact the Funspot team by email or phone for support, feedback, or account issues.',
+    canonicalPath: '/contact/',
+    bodyHtml: body,
+  }));
 }
 
 function buildPrivacyPage() {
-    const body = `
+  const body = `
 <h1>Privacy Policy</h1>
 <p class="meta">Last updated: ${LAST_UPDATED}</p>
 
@@ -262,37 +313,37 @@ information is used.</p>
   <a href="tel:${CONTACT_PHONE.replace(/\s+/g, '')}">${CONTACT_PHONE}</a>.</p>
 </section>
 `;
-    writeFile('privacy/index.html', pageShell({
-        title: 'Privacy Policy — Funspot',
-        description: 'Funspot privacy policy: what data we collect, how it is used, and your choices.',
-        canonicalPath: '/privacy/',
-        bodyHtml: body,
-    }));
+  writeFile('privacy/index.html', pageShell({
+    title: 'Privacy Policy — Funspot',
+    description: 'Funspot privacy policy: what data we collect, how it is used, and your choices.',
+    canonicalPath: '/privacy/',
+    bodyHtml: body,
+  }));
 }
 
 async function buildSitemap(fixtureCount) {
-    const urls = ['/', '/fixtures/', '/results/', '/privacy/', '/about/', '/contact/'];
-    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+  const urls = ['/', '/fixtures/', '/results/', '/privacy/', '/about/', '/contact/'];
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${urls.map(u => `  <url><loc>${SITE_URL}${u}</loc></url>`).join('\n')}
 </urlset>`;
-    writeFile('sitemap.xml', xml);
+  writeFile('sitemap.xml', xml);
 }
 
 async function main() {
-    console.log('🔧 Generating static pages from Clash API...');
-    const fixtures = await buildFixturesPage();
-    await buildResultsPage();
-    buildAboutPage();
-    buildContactPage();
-    buildPrivacyPage();
-    await buildSitemap(fixtures.length);
-    console.log('✅ Static page generation complete.');
+  console.log('🔧 Generating static pages from Clash API...');
+  const fixtures = await buildFixturesPage();
+  await buildResultsPage();
+  buildAboutPage();
+  buildContactPage();
+  buildPrivacyPage();
+  await buildSitemap(fixtures.length);
+  console.log('✅ Static page generation complete.');
 }
 
 main().catch(e => {
-    // Never fail the whole Netlify build if the API is down — the Flutter
-    // app itself must still deploy. Log and exit cleanly.
-    console.error('⚠️ Static page generation failed (non-fatal):', e);
-    process.exit(0);
+  // Never fail the whole Netlify build if the API is down — the Flutter
+  // app itself must still deploy. Log and exit cleanly.
+  console.error('⚠️ Static page generation failed (non-fatal):', e);
+  process.exit(0);
 });
