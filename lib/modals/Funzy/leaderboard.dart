@@ -1475,7 +1475,7 @@ class _ComradeModalState extends State<ComradeModal>
     );
   }
 
-  Widget _buildMemberCard(ComradeWithStats comrade) {
+ Widget _buildMemberCard(ComradeWithStats comrade) {
     final isGold = comrade.rank == 1;
     final isSilver = comrade.rank == 2;
     final isBronze = comrade.rank == 3;
@@ -1483,153 +1483,213 @@ class _ComradeModalState extends State<ComradeModal>
     Color rankColor;
     if (isGold) {
       rankColor = const Color(0xFFFFD700);
-    } else if (isSilver)
+    } else if (isSilver) {
       rankColor = Colors.grey.shade400;
-    else if (isBronze)
+    } else if (isBronze) {
       rankColor = const Color(0xFFCD7F32);
-    else
+    } else {
       rankColor = FanColors.textTertiary;
+    }
+
+    final correctPct = comrade.totalVotes > 0
+        ? (comrade.correctVotes / comrade.totalVotes * 100)
+        : 0.0;
+    final wrongPct = comrade.totalVotes > 0
+        ? ((comrade.totalVotes - comrade.correctVotes) /
+            comrade.totalVotes *
+            100)
+        : 0.0;
 
     return GestureDetector(
       onTap: () => _showUserActivity(comrade),
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-        padding: const EdgeInsets.all(10),
+        margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: FanColors.surface,
           borderRadius: BorderRadius.circular(12),
           border:
               Border.all(color: FanColors.border.withOpacity(0.3), width: 0.5),
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 28,
-              alignment: Alignment.center,
-              child: Text(
-                '#${comrade.rank}',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                  color: rankColor,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: FanColors.primaryDim,
-                shape: BoxShape.circle,
-              ),
-              child: Center(
-                child: Text(
-                  comrade.nickname[0].toUpperCase(),
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: FanColors.primary,
+            // -------- Header: avatar + name + rank badge --------
+            Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: FanColors.primaryDim,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Center(
+                    child: Text(
+                      comrade.nickname[0].toUpperCase(),
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: FanColors.primary,
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         comrade.nickname,
                         style: TextStyle(
-                          fontSize: 11,
+                          fontSize: 12,
                           fontWeight: FontWeight.w600,
                           color: FanColors.textPrimary,
                         ),
                       ),
-                      const SizedBox(width: 3),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 4, vertical: 1),
-                        decoration: BoxDecoration(
-                          color: FanColors.primaryDim,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          'COM',
-                          style: TextStyle(
-                            fontSize: 5,
-                            fontWeight: FontWeight.bold,
-                            color: FanColors.primary,
-                          ),
-                        ),
+                      Text(
+                        '#${comrade.rank} · ${comrade.clubFan.isNotEmpty ? comrade.clubFan : "No club"}',
+                        style: TextStyle(
+                            fontSize: 9, color: FanColors.textTertiary),
                       ),
                     ],
                   ),
-                  if (comrade.clubFan.isNotEmpty)
-                    Row(
-                      children: [
-                        Icon(Icons.sports_soccer,
-                            size: 8, color: FanColors.textTertiary),
-                        const SizedBox(width: 2),
-                        Text(
-                          comrade.clubFan,
-                          style: TextStyle(
-                              fontSize: 7, color: FanColors.textTertiary),
-                        ),
-                      ],
-                    ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            // -------- Stat rows: label left, value right --------
+            _statRow(
+              label: 'Rating',
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ...List.generate(5, (i) {
+                    final filled = comrade.accuracyPercentage / 20 > i;
+                    return Icon(
+                      filled ? Icons.star : Icons.star_border,
+                      size: 11,
+                      color: filled ? rankColor : FanColors.border,
+                    );
+                  }),
+                  const SizedBox(width: 4),
+                  Text('(${comrade.totalPoints})',
+                      style: TextStyle(
+                          fontSize: 9, color: FanColors.textTertiary)),
                 ],
               ),
             ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.trending_up,
-                      size: 8,
-                      color: _getAccuracyColor(comrade.accuracyPercentage),
-                    ),
-                    const SizedBox(width: 1),
-                    Text(
-                      '${comrade.accuracyPercentage.toStringAsFixed(0)}%',
+            _statRow(
+              label: 'Votes',
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('${comrade.totalVotes}',
                       style: TextStyle(
-                        fontSize: 8,
-                        fontWeight: FontWeight.w600,
-                        color: _getAccuracyColor(comrade.accuracyPercentage),
+                          fontSize: 10, color: FanColors.textPrimary)),
+                  const SizedBox(width: 6),
+                  Text('${comrade.accuracyPercentage.toStringAsFixed(0)}%',
+                      style: TextStyle(
+                          fontSize: 9,
+                          color:
+                              _getAccuracyColor(comrade.accuracyPercentage))),
+                ],
+              ),
+            ),
+            _statRow(
+              label: 'Accuracy',
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('${comrade.correctVotes}',
+                      style: TextStyle(
+                          fontSize: 10, color: FanColors.textPrimary)),
+                  const SizedBox(width: 6),
+                  Text('${correctPct.toStringAsFixed(0)}%',
+                      style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w600,
+                          color: FanColors.primary)),
+                  const SizedBox(width: 4),
+                  Text('/ ${wrongPct.toStringAsFixed(0)}%',
+                      style: TextStyle(fontSize: 9, color: FanColors.away)),
+                ],
+              ),
+            ),
+            _statRow(
+              label: 'Streak',
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('${comrade.currentStreak}',
+                      style: TextStyle(
+                          fontSize: 10, color: FanColors.textPrimary)),
+                  const SizedBox(width: 4),
+                  Text('best ${comrade.bestStreak}',
+                      style: TextStyle(
+                          fontSize: 9, color: FanColors.textTertiary)),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 10),
+
+            // -------- Bottom: status pill + progress bar --------
+            Row(
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: comrade.isOnline
+                        ? FanColors.primary
+                        : FanColors.textTertiary.withOpacity(0.6),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    comrade.isOnline ? 'ONLINE' : 'OFFLINE',
+                    style: const TextStyle(
+                      fontSize: 8,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(3),
+                    child: SizedBox(
+                      height: 4,
+                      child: LinearProgressIndicator(
+                        value: (comrade.accuracyPercentage / 100).clamp(0, 1),
+                        backgroundColor: FanColors.border,
+                        valueColor: AlwaysStoppedAnimation(rankColor),
                       ),
                     ),
-                  ],
-                ),
-                Text(
-                  '${comrade.totalPoints} pts',
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    color: FanColors.primary,
                   ),
                 ),
-                if (comrade.currentStreak > 0) ...[
-                  Row(
-                    children: [
-                      Icon(Icons.local_fire_department,
-                          size: 8, color: FanColors.draw),
-                      const SizedBox(width: 1),
-                      Text(
-                        '${comrade.currentStreak}',
-                        style: TextStyle(fontSize: 7, color: FanColors.draw),
-                      ),
-                    ],
-                  ),
-                ],
               ],
             ),
           ],
         ),
+      ),
+    );
+  }
+
+// Shared label/value row, mirrors the mql5 layout
+  Widget _statRow({required String label, required Widget trailing}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label,
+              style: TextStyle(fontSize: 10, color: FanColors.textSecondary)),
+          trailing,
+        ],
       ),
     );
   }

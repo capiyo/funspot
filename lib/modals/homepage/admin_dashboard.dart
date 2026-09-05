@@ -2103,164 +2103,214 @@ class _AdminDashboardModalState extends State<AdminDashboardModal> {
   // UPDATED MEMBER ROW WITH REMOVE BUTTON
   // ==========================================================================
 
-  Widget _buildMemberRow(ChannelMemberData member) {
-    final isAdmin = member.role == 'admin';
-    final isCurrentUser = member.userId == widget.userId;
-    final canRemove = !isCurrentUser && !isAdmin;
+ Widget _buildMemberRow(ChannelMemberData member) {
+  final isAdmin = member.role == 'admin';
+  final isCurrentUser = member.userId == widget.userId;
+  final canRemove = !isCurrentUser && !isAdmin;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: FanColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: canRemove
-              ? FanColors.border.withOpacity(0.3)
-              : Colors.transparent,
-          width: 0.5,
-        ),
+  final accuracy = member.totalVotes > 0
+      ? (member.correctVotes / member.totalVotes * 100)
+      : 0.0;
+
+  final Color accent = isAdmin ? FanColors.secondary : FanColors.primary;
+
+  return Container(
+    margin: const EdgeInsets.only(bottom: 8),
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: FanColors.surface,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(
+        color: FanColors.border.withOpacity(0.3),
+        width: 0.5,
       ),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: FanColors.primary.withOpacity(0.1),
-              shape: BoxShape.circle,
-            ),
-            child: Center(
-              child: Text(
-                member.username.isNotEmpty
-                    ? member.username[0].toUpperCase()
-                    : '?',
-                style: TextStyle(
-                    fontSize: 16,
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // -------- Header: avatar + name + badges + remove --------
+        Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: accent.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Center(
+                child: Text(
+                  member.username.isNotEmpty
+                      ? member.username[0].toUpperCase()
+                      : '?',
+                  style: TextStyle(
+                    fontSize: 14,
                     fontWeight: FontWeight.bold,
-                    color: FanColors.primary),
+                    color: accent,
+                  ),
+                ),
               ),
             ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      isCurrentUser ? 'You' : member.username,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight:
-                            isCurrentUser ? FontWeight.w600 : FontWeight.normal,
-                        color: isCurrentUser
-                            ? FanColors.primary
-                            : FanColors.textPrimary,
-                      ),
-                    ),
-                    if (isAdmin && !isCurrentUser) ...[
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: FanColors.secondary.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
                         child: Text(
-                          'admin',
+                          isCurrentUser ? 'You' : member.username,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                              fontSize: 8,
+                            fontSize: 12,
+                            fontWeight: isCurrentUser
+                                ? FontWeight.w700
+                                : FontWeight.w600,
+                            color: isCurrentUser
+                                ? FanColors.primary
+                                : FanColors.textPrimary,
+                          ),
+                        ),
+                      ),
+                      if (isAdmin) ...[
+                        const SizedBox(width: 5),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 5, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: FanColors.secondary.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            'admin',
+                            style: TextStyle(
+                              fontSize: 7,
                               color: FanColors.secondary,
-                              fontWeight: FontWeight.w500),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
                     ],
-                    if (isCurrentUser && isAdmin) ...[
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: FanColors.primary.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(
-                          'you',
-                          style: TextStyle(
-                              fontSize: 8,
-                              color: FanColors.primary,
-                              fontWeight: FontWeight.w500),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 2),
-                Row(
-                  children: [
-                    Icon(Icons.chat_bubble_outline,
-                        size: 10, color: FanColors.textSecondary),
-                    const SizedBox(width: 2),
-                    Text('${member.msgCount} msgs',
-                        style: TextStyle(
-                            fontSize: 9, color: FanColors.textSecondary)),
-                    const SizedBox(width: 8),
-                    Icon(Icons.how_to_vote,
-                        size: 10, color: FanColors.textSecondary),
-                    const SizedBox(width: 2),
-                    Text('${member.totalVotes} votes',
-                        style: TextStyle(
-                            fontSize: 9, color: FanColors.textSecondary)),
-                  ],
-                ),
-              ],
+                  ),
+                  Text(
+                    'joined ${DateHelper.formatTimeAgo(member.joinedAt)}',
+                    style: TextStyle(fontSize: 8, color: FanColors.textTertiary),
+                  ),
+                ],
+              ),
             ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: FanColors.primary.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text('${member.seasonPoints} pts',
-                style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: FanColors.primary)),
-          ),
-          // ✅ REMOVE BUTTON - Only for non-admin, non-current-user members
-          if (canRemove) ...[
-            const SizedBox(width: 8),
-            GestureDetector(
-              onTap: _isRemovingMember
-                  ? null
-                  : () => _showRemoveMemberConfirmation(member),
-              child: Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: FanColors.away.withOpacity(0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: _isRemovingMember
-                    ?  SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
+            if (canRemove)
+              GestureDetector(
+                onTap: _isRemovingMember
+                    ? null
+                    : () => _showRemoveMemberConfirmation(member),
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: FanColors.away.withOpacity(0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: _isRemovingMember
+                      ? SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: FanColors.away,
+                          ),
+                        )
+                      : Icon(
+                          Icons.remove_circle_outline,
                           color: FanColors.away,
+                          size: 16,
                         ),
-                      )
-                    : Icon(
-                        Icons.remove_circle_outline,
-                        color: FanColors.away,
-                        size: 18,
-                      ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+
+        // -------- Stat rows --------
+        _mqlStatRow(
+          label: 'Points',
+          trailing: Text(
+            '${member.seasonPoints}',
+            style: TextStyle(
+                fontSize: 10, fontWeight: FontWeight.w700, color: accent),
+          ),
+        ),
+        _mqlStatRow(
+          label: 'Votes',
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('${member.totalVotes}',
+                  style: TextStyle(fontSize: 10, color: FanColors.textPrimary)),
+              const SizedBox(width: 6),
+              Text('${accuracy.toStringAsFixed(0)}% correct',
+                  style: TextStyle(fontSize: 9, color: FanColors.textTertiary)),
+            ],
+          ),
+        ),
+        _mqlStatRow(
+          label: 'Messages',
+          trailing: Text(
+            '${member.msgCount}',
+            style: TextStyle(fontSize: 10, color: FanColors.textPrimary),
+          ),
+        ),
+
+        const SizedBox(height: 8),
+
+        // -------- Bottom: role pill + accuracy progress bar --------
+        Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: isAdmin ? FanColors.secondary : FanColors.primary,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                isAdmin ? 'ADMIN' : 'MEMBER',
+                style: const TextStyle(
+                  fontSize: 8,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(3),
+                child: SizedBox(
+                  height: 4,
+                  child: LinearProgressIndicator(
+                    value: (accuracy / 100).clamp(0, 1),
+                    backgroundColor: FanColors.border,
+                    valueColor: AlwaysStoppedAnimation(accent),
+                  ),
+                ),
               ),
             ),
           ],
+        ),
+      ],
+    ),
+  );
+}
+Widget _mqlStatRow({required String label, required Widget trailing}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label,
+              style: TextStyle(fontSize: 9, color: FanColors.textTertiary)),
+          trailing,
         ],
       ),
     );

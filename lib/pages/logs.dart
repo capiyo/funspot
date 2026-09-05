@@ -36,6 +36,71 @@ import '../widgets/web_native_ad_card.dart';
 // ============================================================
 // FIXTURE COMMENT - Defined locally (not in fixture_models)
 // ============================================================
+class _MiniPersonColumn extends StatelessWidget {
+  final String name;
+  final String subtitle;
+  final String pick;
+  final Color color;
+
+  const _MiniPersonColumn({
+    required this.name,
+    required this.subtitle,
+    required this.pick,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 26,
+          height: 26,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: FanColors.surface,
+            border: Border.all(color: color.withOpacity(0.4), width: 1),
+          ),
+          child: Center(
+            child: Text(
+              name.isNotEmpty ? name[0].toUpperCase() : '?',
+              style: TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 9,
+            fontWeight: FontWeight.w600,
+            color: FanColors.textSecondary,
+          ),
+        ),
+        Text(
+          subtitle,
+          style: TextStyle(fontSize: 7, color: FanColors.textTertiary),
+        ),
+        Text(
+          pick,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style:
+              TextStyle(fontSize: 8, fontWeight: FontWeight.w700, color: color),
+        ),
+      ],
+    );
+  }
+}
 
 class FixtureComment {
   final String id;
@@ -524,6 +589,98 @@ class _HistoryPageState extends State<HistoryPage>
 
   // Random for mock comments
   final Random _random = Random();
+  Color _pickColor(String? selection, String homeTeam, String awayTeam) {
+    if (selection == 'home_team' || selection == 'home')
+      return FanColors.primary;
+    if (selection == 'away_team' || selection == 'away') return FanColors.away;
+    return FanColors.draw;
+  }
+
+  String _pickLabel(String? selection, String homeTeam, String awayTeam) {
+    if (selection == 'home_team' || selection == 'home') return homeTeam;
+    if (selection == 'away_team' || selection == 'away') return awayTeam;
+    if (selection == 'draw') return 'Draw';
+    return selection ?? '';
+  }
+
+  Widget? _buildTopThreeForHistoryItem(HistoryItem item) {
+    final fixtureId = item.fixtureId;
+    List<Widget> people = [];
+
+    // Tier 1: voters
+    if (item.voters.isNotEmpty) {
+      people = item.voters.take(3).map((v) {
+        final isMe = v.userId == widget.userId;
+        return _MiniPersonColumn(
+          name: isMe ? 'You' : v.userName,
+          subtitle: 'voted',
+          pick: _pickLabel(v.selection, item.homeTeam, item.awayTeam),
+          color: _pickColor(v.selection, item.homeTeam, item.awayTeam),
+        );
+      }).toList();
+    }
+
+    // Tier 2: pledges
+    if (people.isEmpty) {
+      final pledges = _pledgesCache[fixtureId] ?? [];
+      if (pledges.isNotEmpty) {
+        people = pledges.take(3).map((p) {
+          final userId =
+              p['user_id']?.toString() ?? p['userId']?.toString() ?? '';
+          final userName =
+              p['user_name']?.toString() ?? p['userName']?.toString() ?? 'Fan';
+          final selection = p['selection']?.toString();
+          final isMe = userId == widget.userId;
+          return _MiniPersonColumn(
+            name: isMe ? 'You' : userName,
+            subtitle: 'pledged',
+            pick: _pickLabel(selection, item.homeTeam, item.awayTeam),
+            color: _pickColor(selection, item.homeTeam, item.awayTeam),
+          );
+        }).toList();
+      }
+    }
+
+    // Tier 3: comments
+    if (people.isEmpty) {
+      final comments = _fixtureComments[fixtureId] ?? item.comments;
+      if (comments.isNotEmpty) {
+        people = comments.take(3).map((c) {
+          final isMe = c.userId == widget.userId;
+          return _MiniPersonColumn(
+            name: isMe ? 'You' : c.username,
+            subtitle: 'commented',
+            pick: _pickLabel(c.selection, item.homeTeam, item.awayTeam),
+            color: _pickColor(c.selection, item.homeTeam, item.awayTeam),
+          );
+        }).toList();
+      }
+    }
+
+    // Tier 4: mock, if voters/pledges/comments are all empty
+    if (people.isEmpty) {
+      final picks = ['home_team', 'away_team', 'draw'];
+      people = List.generate(3, (i) {
+        final name = _sampleUsernames[_random.nextInt(_sampleUsernames.length)];
+        final sel = picks[_random.nextInt(picks.length)];
+        return _MiniPersonColumn(
+          name: name,
+          subtitle: 'fan',
+          pick: _pickLabel(sel, item.homeTeam, item.awayTeam),
+          color: _pickColor(sel, item.homeTeam, item.awayTeam),
+        );
+      });
+    }
+
+    return Row(
+      children: [
+        for (int i = 0; i < people.length; i++) ...[
+          if (i > 0) const SizedBox(width: 14),
+          Expanded(child: people[i]),
+        ],
+      ],
+    );
+  }
 
   // Sample data for mock comments
   final List<String> _sampleUsernames = [
@@ -599,6 +756,44 @@ class _HistoryPageState extends State<HistoryPage>
 
   void _onThemeChanged() {
     if (mounted) setState(() {});
+  }
+  // Pledges cache (mirrors the voters/comments caches above)
+  final Map<String, List<Map<String, dynamic>>> _pledgesCache = {};
+  final Map<String, bool> _pledgesLoading = {};
+
+  Future<void> _fetchPledgesForFixture(HistoryItem item) async {
+    final fixtureId = item.fixtureId;
+    if (_pledgesCache.containsKey(fixtureId)) return;
+    if (_pledgesLoading[fixtureId] == true) return;
+
+    final channelId = _resolveChannelIdFor(item);
+    if (channelId == null) return;
+
+    _pledgesLoading[fixtureId] = true;
+
+    try {
+      final response = await http.get(
+        Uri.parse('$API_BASE_URL/actions/channel/$channelId/$fixtureId/pledges'
+            '?_=${DateTime.now().millisecondsSinceEpoch}'),
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          if (widget.authToken != null && widget.authToken!.isNotEmpty)
+            'Authorization': 'Bearer ${widget.authToken}',
+        },
+      ).timeout(REQUEST_TIMEOUT);
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final List<dynamic> pledgesData = data['pledges'] ?? [];
+        _pledgesCache[fixtureId] = pledgesData.cast<Map<String, dynamic>>();
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error fetching pledges for $fixtureId: $e');
+    } finally {
+      _pledgesLoading[fixtureId] = false;
+      if (mounted) setState(() {});
+    }
   }
 
   @override
@@ -1190,6 +1385,11 @@ class _HistoryPageState extends State<HistoryPage>
 
       final voters = await _fetchVotersForFixture(
           item.fixtureId, item.winner, item.homeTeam, item.awayTeam);
+
+      if (voters.isEmpty) {
+        // Only bother fetching pledges when there are no voters to show
+        unawaited(_fetchPledgesForFixture(item));
+      }
 
       if (voters.isNotEmpty && mounted) {
         setState(() {
@@ -1963,7 +2163,7 @@ class _HistoryPageState extends State<HistoryPage>
   // HISTORY CARD — slim, backgroundless-text design
   // ============================================================
 
-  Widget _buildHistoryCard(HistoryItem item) {
+ Widget _buildHistoryCard(HistoryItem item) {
     final unread = item.unreadCount > 0;
     final timeAgo = HistoryDateHelper.formatTimeAgo(item.lastActivity);
     final matchup = (item.homeTeam.isNotEmpty && item.awayTeam.isNotEmpty)
@@ -2157,7 +2357,7 @@ class _HistoryPageState extends State<HistoryPage>
                 ),
               ],
 
-              // Voters — compact overlapping avatars, no chip backgrounds
+              // Top 3: voters → pledges → comments → mock
               if (widget.isLoggedIn) ...[
                 const SizedBox(height: 8),
                 if (isLoadingVoters)
@@ -2173,55 +2373,13 @@ class _HistoryPageState extends State<HistoryPage>
                         ),
                       ),
                       const SizedBox(width: 6),
-                      Text(
-                        'Loading votes…',
-                        style: TextStyle(
-                            fontSize: 10, color: FanColors.textTertiary),
-                      ),
+                      Text('Loading…',
+                          style: TextStyle(
+                              fontSize: 10, color: FanColors.textTertiary)),
                     ],
-                  )
-                else if (item.voters.isEmpty)
-                  Text(
-                    'No votes yet',
-                    style:
-                        TextStyle(fontSize: 10, color: FanColors.textTertiary),
                   )
                 else
-                  Row(
-                    children: [
-                      SizedBox(
-                        height: 20,
-                        width: 20 +
-                            (min(item.voters.length, 6) - 1).clamp(0, 5) * 13.0,
-                        child: Stack(
-                          children: [
-                            for (int i = 0; i < min(item.voters.length, 6); i++)
-                              Padding(
-                                padding: EdgeInsets.only(left: i * 13.0),
-                                child: _VoterDot(
-                                  voter: item.voters[i],
-                                  isUser:
-                                      item.voters[i].userId == widget.userId,
-                                  homeTeam: item.homeTeam,
-                                  awayTeam: item.awayTeam,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                      if (item.voters.length > 6) ...[
-                        const SizedBox(width: 6),
-                        Text(
-                          '+${item.voters.length - 6}',
-                          style: TextStyle(
-                            fontSize: 9.5,
-                            fontWeight: FontWeight.w500,
-                            color: FanColors.textTertiary,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
+                  _buildTopThreeForHistoryItem(item) ?? const SizedBox.shrink(),
               ],
 
               // Latest comment — plain, hairline divider instead of a box

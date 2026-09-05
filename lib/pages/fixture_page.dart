@@ -65,6 +65,84 @@ class LiveCommentaryEntry {
   });
 }
 
+class _MqlPersonData {
+  final String name;
+  final String subtitle; // 'matched' / 'pledged' / 'voted' / 'fan'
+  final String pick;
+  final Color color;
+  final double? amount;
+
+  _MqlPersonData({
+    required this.name,
+    required this.subtitle,
+    required this.pick,
+    required this.color,
+    this.amount,
+  });
+}
+
+Widget _buildMiniMqlPersonCard(_MqlPersonData p) {
+  return Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Container(
+        width: 34,
+        height: 34,
+        decoration: BoxDecoration(
+          color: p.color.withValues(alpha: 0.12),
+          shape: BoxShape.circle,
+          border: Border.all(color: p.color.withValues(alpha: 0.3), width: 1),
+        ),
+        child: Center(
+          child: Text(
+            p.name.isNotEmpty ? p.name[0].toUpperCase() : '?',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+              color: p.color,
+            ),
+          ),
+        ),
+      ),
+      const SizedBox(height: 3),
+      Text(
+        p.name,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          fontSize: 9.5,
+          fontWeight: FontWeight.w600,
+          color: FanColors.textPrimary,
+        ),
+      ),
+      Text(
+        p.subtitle,
+        style: TextStyle(fontSize: 7, color: FanColors.textTertiary),
+      ),
+      const SizedBox(height: 2),
+      Text(
+        p.pick,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          fontSize: 8.5,
+          fontWeight: FontWeight.w700,
+          color: p.color,
+        ),
+      ),
+      if (p.amount != null)
+        Text(
+          'KES ${p.amount!.toStringAsFixed(0)}',
+          style: TextStyle(fontSize: 7, color: FanColors.textTertiary),
+        ),
+    ],
+  );
+}
+
+
+
 class _SpeechBubbleInput extends StatefulWidget {
   final TextEditingController controller;
   final bool enabled;
@@ -6445,6 +6523,84 @@ class FixturesPageState extends State<FixturesPage>
     );
   }
 
+
+  Widget _buildTopThreePreview(Fixture fixture) {
+  final fixtureId = fixture.matchId;
+  List<_MqlPersonData> people = [];
+
+  // Tier 1 & 2: only consulted if the pledges/bets feature is visible
+  if (_showPledgesTab) {
+    final matchedBets =
+        (_bettors[fixtureId] ?? []).where((b) => b.isMatched).toList();
+    if (matchedBets.isNotEmpty) {
+      people = matchedBets.take(3).map((b) => _MqlPersonData(
+            name: b.userId == widget.userId ? 'You' : b.userName,
+            subtitle: 'matched',
+            pick: _getVoteDisplayText(
+                b.selection, fixture.homeTeam, fixture.awayTeam),
+            color: _getVoteColor(b.selection),
+            amount: b.amount,
+          )).toList();
+    } else {
+      final pledges = _pledgers[fixtureId] ?? [];
+      if (pledges.isNotEmpty) {
+        people = pledges.take(3).map((p) => _MqlPersonData(
+              name: p.userId == widget.userId ? 'You' : p.userName,
+              subtitle: 'pledged',
+              pick: _getVoteDisplayText(
+                  p.selection, fixture.homeTeam, fixture.awayTeam),
+              color: _getVoteColor(p.selection),
+              amount: p.amount,
+            )).toList();
+      }
+    }
+  }
+
+  // Tier 3: voters, if bets and pledges both came up empty
+  if (people.isEmpty) {
+    final voters = _getVotersForFixture(fixtureId);
+    if (voters.isNotEmpty) {
+      people = voters.entries.take(3).map((e) => _MqlPersonData(
+            name: e.key == widget.userId ? 'You' : (e.value['username'] ?? 'Fan'),
+            subtitle: 'voted',
+            pick: _getVoteDisplayText(
+                e.value['selection'], fixture.homeTeam, fixture.awayTeam),
+            color: _getVoteColor(e.value['selection']),
+            amount: null,
+          )).toList();
+    }
+  }
+
+  // Tier 4: mock, if everything above is empty
+  if (people.isEmpty) {
+    final picks = ['home_team', 'away_team', 'draw'];
+    people = List.generate(3, (i) {
+      final name = _sampleUsernames[_random.nextInt(_sampleUsernames.length)];
+      final sel = picks[_random.nextInt(picks.length)];
+      return _MqlPersonData(
+        name: name,
+        subtitle: 'fan',
+        pick: _getVoteDisplayText(sel, fixture.homeTeam, fixture.awayTeam),
+        color: _getVoteColor(sel),
+        amount: null,
+      );
+    });
+  }
+
+  // Backgroundless — no Container decoration, just the row of mini cards
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Row(
+      children: [
+        for (int i = 0; i < people.length; i++) ...[
+          if (i > 0) const SizedBox(width: 10),
+          Expanded(child: _buildMiniMqlPersonCard(people[i])),
+        ],
+      ],
+    ),
+  );
+}
+
   void _showDialogDrawMatchConfirmation(Bettor pledger, Fixture fixture) {
     _selectedDialogMatchOption = null;
 
@@ -10433,6 +10589,7 @@ class FixturesPageState extends State<FixturesPage>
               const SizedBox(height: 6),
 
               // ✅ Always show comment input (even when live or at half-time)
+               _buildTopThreePreview(fixture),
               _buildCommentInput(fixture, index),
 
               const SizedBox(height: 6),

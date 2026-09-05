@@ -569,127 +569,196 @@ class _CreateChannelModalState extends State<CreateChannelModal> {
   // ==========================================================================
   // BUILD: USER TILE (+ channel history chips)
   // ==========================================================================
-  Widget _buildUserTile(UserProfile user) {
+ Widget _buildUserTile(UserProfile user) {
     final isSelected = _selectedMembers.any((m) => m.userId == user.userId);
+    final history = user.channelHistory;
+    final isAnyAdmin = history.any((m) => m.role == 'admin');
+    final totalPoints = history.fold<int>(0, (sum, m) => sum + m.seasonPoints);
+    final totalVotes = history.fold<int>(0, (sum, m) => sum + m.totalVotes);
+    final totalCorrect = history.fold<int>(0, (sum, m) => sum + m.correctVotes);
+    final accuracy = totalVotes > 0 ? (totalCorrect / totalVotes * 100) : 0.0;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: FanDecorations.card(
-        isActive: isSelected,
-        borderColor:
-            isSelected ? FanColors.primary.withValues(alpha: 0.3) : null,
-      ).copyWith(
-        color: isSelected ? FanColors.primaryDim : FanColors.surface,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              // Avatar
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: FanColors.primaryMuted,
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color:
-                        isSelected ? FanColors.primary : FanColors.borderActive,
-                    width: 1,
-                  ),
-                ),
-                child: Center(
-                  child: Text(
-                    user.nickname[0].toUpperCase(),
-                    style: FanTypography.title.copyWith(
-                      fontSize: 18,
-                      color: FanColors.primary,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-
-              // User info
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      user.nickname,
-                      style: FanTypography.title,
-                    ),
-                    const SizedBox(height: 2),
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.sports_soccer,
-                          size: 10,
-                          color: FanColors.textTertiary,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          user.clubFan,
-                          style: FanTypography.caption,
-                        ),
-                        const SizedBox(width: 12),
-                        Icon(
-                          Icons.flag,
-                          size: 10,
-                          color: FanColors.textTertiary,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          user.countryFan,
-                          style: FanTypography.caption,
-                        ),
-                      ],
-                    ),
-                    Text(
-                      '@${user.username}',
-                      style: FanTypography.caption.copyWith(
-                        color: FanColors.textTertiary,
-                        fontSize: 9,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              // Select button
-              GestureDetector(
-                onTap: () => _toggleMember(user),
-                child: Container(
-                  width: 32,
-                  height: 32,
+    return GestureDetector(
+      onTap: () => _toggleMember(user),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(12),
+        decoration: FanDecorations.card(
+          isActive: isSelected,
+          borderColor:
+              isSelected ? FanColors.primary.withValues(alpha: 0.3) : null,
+        ).copyWith(
+          color: isSelected ? FanColors.primaryDim : FanColors.surface,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // -------- Header: avatar + name + select button --------
+            Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
                   decoration: BoxDecoration(
-                    color: isSelected
-                        ? FanColors.primary
-                        : FanColors.surfaceSunken,
+                    color: FanColors.primaryMuted,
                     shape: BoxShape.circle,
                     border: Border.all(
-                      color: isSelected ? FanColors.primary : FanColors.border,
+                      color: isSelected
+                          ? FanColors.primary
+                          : FanColors.borderActive,
                       width: 1,
                     ),
                   ),
-                  child: Icon(
-                    isSelected ? Icons.check : Icons.add,
-                    size: 16,
-                    color: isSelected ? Colors.white : FanColors.textTertiary,
+                  child: Center(
+                    child: Text(
+                      user.nickname.isNotEmpty
+                          ? user.nickname[0].toUpperCase()
+                          : '?',
+                      style: FanTypography.title.copyWith(
+                        fontSize: 16,
+                        color: FanColors.primary,
+                      ),
+                    ),
                   ),
                 ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(user.nickname,
+                          style: FanTypography.title.copyWith(fontSize: 13)),
+                      Text(
+                        '@${user.username}',
+                        style: FanTypography.caption.copyWith(
+                          color: FanColors.textTertiary,
+                          fontSize: 9,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () => _toggleMember(user),
+                  child: Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? FanColors.primary
+                          : FanColors.surfaceSunken,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color:
+                            isSelected ? FanColors.primary : FanColors.border,
+                        width: 1,
+                      ),
+                    ),
+                    child: Icon(
+                      isSelected ? Icons.check : Icons.add,
+                      size: 14,
+                      color: isSelected ? Colors.white : FanColors.textTertiary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+
+            // -------- Stat rows --------
+            _mqlStatRow(
+              label: 'Club',
+              trailing: Text(user.clubFan,
+                  style: FanTypography.caption
+                      .copyWith(fontSize: 10, color: FanColors.textPrimary)),
+            ),
+            _mqlStatRow(
+              label: 'Country',
+              trailing: Text(user.countryFan,
+                  style: FanTypography.caption
+                      .copyWith(fontSize: 10, color: FanColors.textPrimary)),
+            ),
+            if (history.isNotEmpty) ...[
+              _mqlStatRow(
+                label: 'Channels',
+                trailing: Text('${history.length}',
+                    style: FanTypography.caption
+                        .copyWith(fontSize: 10, color: FanColors.textPrimary)),
+              ),
+              _mqlStatRow(
+                label: 'Points',
+                trailing: Text('$totalPoints',
+                    style: FanTypography.caption.copyWith(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: FanColors.primary)),
               ),
             ],
-          ),
 
-          // Existing channel history (admin/member of other channels,
-          // including their synced stats)
-          if (user.channelHistory.isNotEmpty) ...[
             const SizedBox(height: 8),
-            _buildChannelHistoryRow(user.channelHistory),
+
+            // -------- Bottom: status pill + progress bar --------
+            Row(
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: history.isEmpty
+                        ? FanColors.textTertiary.withValues(alpha: 0.6)
+                        : (isAnyAdmin
+                            ? FanColors.secondary
+                            : FanColors.primary),
+                    borderRadius: FanRadius.pillAll,
+                  ),
+                  child: Text(
+                    history.isEmpty
+                        ? 'NEW'
+                        : (isAnyAdmin ? 'ADMIN ELSEWHERE' : 'MEMBER ELSEWHERE'),
+                    style: const TextStyle(
+                      fontSize: 7,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+                if (history.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(3),
+                      child: SizedBox(
+                        height: 4,
+                        child: LinearProgressIndicator(
+                          value: (accuracy / 100).clamp(0, 1),
+                          backgroundColor: FanColors.border,
+                          valueColor: AlwaysStoppedAnimation(isAnyAdmin
+                              ? FanColors.secondary
+                              : FanColors.primary),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ],
+        ),
+      ),
+    );
+  }
+  Widget _mqlStatRow({required String label, required Widget trailing}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label,
+              style: FanTypography.caption.copyWith(
+                fontSize: 9,
+                color: FanColors.textTertiary,
+              )),
+          trailing,
         ],
       ),
     );

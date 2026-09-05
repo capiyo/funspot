@@ -1118,6 +1118,105 @@ class _SwipeableVotePledgeModalState extends State<SwipeableVotePledgeModal>
     }
   }
 
+
+  Widget _mqlStatRow({required String label, required Widget trailing}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label,
+              style: TextStyle(fontSize: 9, color: FanColors.textTertiary)),
+          trailing,
+        ],
+      ),
+    );
+  }
+
+  Widget _mqlCard({
+    required String name,
+    required String subtitle, // e.g. "today, 01:15" or time-ago
+    required Color accent,
+    required List<Widget> statRows,
+    required String pillLabel,
+    required Color pillColor,
+    double? progress, // 0..1, null hides the bar
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: FanColors.surface,
+        borderRadius: BorderRadius.circular(10),
+        border:
+            Border.all(color: FanColors.border.withOpacity(0.3), width: 0.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _Avatar(name: name, color: accent, size: 32),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(name,
+                        style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: FanColors.textPrimary)),
+                    Text(subtitle,
+                        style: TextStyle(
+                            fontSize: 8, color: FanColors.textTertiary)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ...statRows,
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: pillColor,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  pillLabel,
+                  style: const TextStyle(
+                      fontSize: 8,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white),
+                ),
+              ),
+              if (progress != null) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(3),
+                    child: SizedBox(
+                      height: 4,
+                      child: LinearProgressIndicator(
+                        value: progress.clamp(0, 1),
+                        backgroundColor: FanColors.border,
+                        valueColor: AlwaysStoppedAnimation(pillColor),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   // ==========================================================================
   // PLEDGE HANDLING
   // ==========================================================================
@@ -2684,7 +2783,7 @@ class _SwipeableVotePledgeModalState extends State<SwipeableVotePledgeModal>
     );
   }
 
-  Widget _buildVotersList() {
+ Widget _buildVotersList() {
     if (_isLoadingVoters && _voters.isEmpty) {
       return _emptyState(spinner: true, label: 'Loading votes…');
     }
@@ -2715,31 +2814,30 @@ class _SwipeableVotePledgeModalState extends State<SwipeableVotePledgeModal>
         final voteColor = _getVoteColor(voter.selection);
         final voteDisplay = _displayVote(voter.selection);
 
-        return _PersonTile(
-          name: voter.userName,
-          isMe: isMe,
+        return _mqlCard(
+          name: isMe ? 'You' : voter.userName,
+          subtitle: voter.isComrade && !isMe ? 'comrade' : 'voter',
           accent: voteColor,
-          subtitle: 'Voted for $voteDisplay',
-          badges: [
-            if (voter.isComrade && !isMe)
-               _Badge(label: 'comrade', color: FanColors.primary)
+          statRows: [
+            _mqlStatRow(
+              label: 'Pick',
+              trailing: Text(voteDisplay,
+                  style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: voteColor)),
+            ),
           ],
-          trailing: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-                color: voteColor.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(10)),
-            child: Text(voteDisplay,
-                style: TextStyle(
-                    fontSize: 8,
-                    fontWeight: FontWeight.w600,
-                    color: voteColor)),
-          ),
+          pillLabel: voteDisplay.toUpperCase(),
+          pillColor: voteColor,
+          progress:
+              voter.selection.contains('home') || voter.selection == 'home'
+                  ? _voteStats.homePercentage / 100
+                  : _voteStats.awayPercentage / 100,
         );
       },
     );
   }
-
   // ==========================================================================
   // SHARED EMPTY-STATE
   // ==========================================================================
@@ -2869,74 +2967,74 @@ class _SwipeableVotePledgeModalState extends State<SwipeableVotePledgeModal>
     );
   }
 
-  Widget _buildPledgeList() {
-    if (_isLoadingPledges) {
-      return  Center(
-        child: SizedBox(
-            width: 16,
-            height: 16,
-            child: CircularProgressIndicator(
-                strokeWidth: 2, color: FanColors.primary)),
-      );
-    }
-
-    if (_pledges.isEmpty) {
-      return _emptyState(
-          icon: Icons.attach_money,
-          label: 'No pledges yet',
-          sublabel: 'Be the first to pledge on this match');
-    }
-
-    final isLive = _isLive;
-
-    return ListView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: _pledges.length,
-      itemBuilder: (context, index) {
-        final pledge = _pledges[index];
-        final isMe = pledge.userId == widget.userId;
-        final voteColor = _getVoteColor(pledge.selection);
-        final voteDisplay = _displayVote(pledge.selection);
-        final canMatch = !isMe && pledge.isOpen && !isLive;
-
-        return _PersonTile(
-          name: pledge.userName,
-          isMe: isMe,
-          accent: voteColor,
-          highlight: isMe,
-          subtitle: 'Pledged for $voteDisplay',
-          badges: [
-            if (isMe)  _Badge(label: 'you', color: FanColors.primary),
-          ],
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (canMatch) ...[
-                _PillButton(
-                    label: 'MATCH',
-                    color: FanColors.primary,
-                    small: true,
-                    onTap: () => _matchPledge(pledge)),
-                const SizedBox(width: 4),
-              ],
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                    color: FanColors.primaryDim,
-                    borderRadius: BorderRadius.circular(8)),
-                child: Text('KES ${pledge.amount.toStringAsFixed(2)}',
-                    style: TextStyle(
-                        fontSize: 8,
-                        fontWeight: FontWeight.w700,
-                        color: FanColors.primary)),
-              ),
-            ],
-          ),
-        );
-      },
+ Widget _buildPledgeList() {
+  if (_isLoadingPledges) {
+    return Center(
+      child: SizedBox(
+          width: 16, height: 16,
+          child: CircularProgressIndicator(strokeWidth: 2, color: FanColors.primary)),
     );
   }
+
+  if (_pledges.isEmpty) {
+    return _emptyState(
+        icon: Icons.attach_money,
+        label: 'No pledges yet',
+        sublabel: 'Be the first to pledge on this match');
+  }
+
+  final isLive = _isLive;
+
+  return ListView.builder(
+    shrinkWrap: true,
+    physics: const NeverScrollableScrollPhysics(),
+    itemCount: _pledges.length,
+    itemBuilder: (context, index) {
+      final pledge = _pledges[index];
+      final isMe = pledge.userId == widget.userId;
+      final voteColor = _getVoteColor(pledge.selection);
+      final voteDisplay = _displayVote(pledge.selection);
+      final canMatch = !isMe && pledge.isOpen && !isLive;
+
+      return _mqlCard(
+        name: isMe ? 'You' : pledge.userName,
+        subtitle: isMe ? 'your pledge' : 'pledged',
+        accent: voteColor,
+        statRows: [
+          _mqlStatRow(
+            label: 'Pick',
+            trailing: Text(voteDisplay,
+                style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: voteColor)),
+          ),
+          _mqlStatRow(
+            label: 'Stake',
+            trailing: Text('KES ${pledge.amount.toStringAsFixed(2)}',
+                style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: FanColors.primary)),
+          ),
+          if (canMatch)
+            _mqlStatRow(
+              label: 'Action',
+              trailing: GestureDetector(
+                onTap: () => _matchPledge(pledge),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: FanColors.primary,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Text('MATCH',
+                      style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.white)),
+                ),
+              ),
+            ),
+        ],
+        pillLabel: pledge.isOpen ? 'OPEN' : 'MATCHED',
+        pillColor: pledge.isOpen ? FanColors.primary : FanColors.textTertiary,
+        progress: null,
+      );
+    },
+  );
+}
 
   // ==========================================================================
   // SUB-FIXTURES TAB
@@ -3495,132 +3593,55 @@ class _SwipeableVotePledgeModalState extends State<SwipeableVotePledgeModal>
     );
   }
 
-  Widget _buildBetCard(Bet bet) {
-    final isStarter = bet.starterId == widget.userId;
-    final isFinisher = bet.finisherId == widget.userId;
+ Widget _buildBetCard(Bet bet) {
+  final isStarter = bet.starterId == widget.userId;
+  final isFinisher = bet.finisherId == widget.userId;
 
-    String getPickLabel(String? selection) {
-      if (selection == null) return '?';
-      if (selection == 'home') return 'Home';
-      if (selection == 'away') return 'Away';
-      return selection;
-    }
-
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: FanColors.surface,
-        borderRadius: BorderRadius.circular(10),
-        border:
-            Border.all(color: FanColors.border.withOpacity(0.3), width: 0.5),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                        color: FanColors.primaryDim, shape: BoxShape.circle),
-                    child:  Icon(Icons.sports_score,
-                        size: 12, color: FanColors.primary),
-                  ),
-                  const SizedBox(width: 4),
-                  Text('Bet #${bet.id!.substring(0, 8)}',
-                      style: TextStyle(
-                          fontSize: 9,
-                          fontWeight: FontWeight.w700,
-                          color: FanColors.textPrimary)),
-                ],
-              ),
-              _Badge(
-                label: bet.status.toUpperCase(),
-                color: bet.isActive
-                    ? FanColors.primary
-                    : (bet.isSettled ? FanColors.secondary : FanColors.away),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              Expanded(
-                child: _betSideBox(
-                  label: isStarter ? 'YOU' : bet.starterName.toUpperCase(),
-                  highlight: isStarter,
-                  color: FanColors.primary,
-                  pick: getPickLabel(bet.starterSelection),
-                  amount: bet.starterAmount,
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Column(
-                  children: [
-                    Text('VS',
-                        style: TextStyle(
-                            fontSize: 8,
-                            fontWeight: FontWeight.bold,
-                            color: FanColors.textTertiary)),
-                    const SizedBox(height: 2),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 3, vertical: 1),
-                      decoration: BoxDecoration(
-                          color: FanColors.primaryDim,
-                          borderRadius: BorderRadius.circular(4)),
-                      child: Text('KES ${bet.totalPot.toStringAsFixed(2)}',
-                          style: TextStyle(
-                              fontSize: 7,
-                              fontWeight: FontWeight.w700,
-                              color: FanColors.primary)),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: _betSideBox(
-                  label: isFinisher
-                      ? 'YOU'
-                      : (bet.finisherName?.toUpperCase() ?? '?'),
-                  highlight: isFinisher,
-                  color: FanColors.secondary,
-                  pick: getPickLabel(bet.finisherSelection),
-                  amount: bet.finisherAmount,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Divider(color: FanColors.border.withOpacity(0.3), height: 0.5),
-          const SizedBox(height: 2),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.timer, size: 8, color: FanColors.textTertiary),
-              const SizedBox(width: 2),
-              Text(bet.isSettled ? 'Settled' : 'Waiting for match result',
-                  style: TextStyle(fontSize: 7, color: FanColors.textTertiary)),
-              const SizedBox(width: 4),
-              Container(
-                  width: 2,
-                  height: 2,
-                  decoration: BoxDecoration(
-                      color: FanColors.textTertiary, shape: BoxShape.circle)),
-              const SizedBox(width: 4),
-              Text('Created ${_timeAgo(bet.createdAt)}',
-                  style: TextStyle(fontSize: 6, color: FanColors.textTertiary)),
-            ],
-          ),
-        ],
-      ),
-    );
+  String getPickLabel(String? selection) {
+    if (selection == 'home') return 'Home';
+    if (selection == 'away') return 'Away';
+    return selection ?? '?';
   }
+
+  final name = isStarter
+      ? 'You vs ${bet.finisherName ?? "?"}'
+      : (isFinisher ? '${bet.starterName} vs You' : '${bet.starterName} vs ${bet.finisherName ?? "?"}');
+
+  return Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+    child: _mqlCard(
+      name: name,
+      subtitle: 'Bet #${bet.id!.substring(0, 8)} · ${_timeAgo(bet.createdAt)}',
+      accent: FanColors.primary,
+      statRows: [
+        _mqlStatRow(
+          label: bet.starterName,
+          trailing: Text(
+            '${getPickLabel(bet.starterSelection)} · KES ${bet.starterAmount?.toStringAsFixed(2) ?? "0.00"}',
+            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: FanColors.primary),
+          ),
+        ),
+        _mqlStatRow(
+          label: bet.finisherName ?? 'Waiting',
+          trailing: Text(
+            '${getPickLabel(bet.finisherSelection)} · KES ${bet.finisherAmount?.toStringAsFixed(2) ?? "0.00"}',
+            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: FanColors.secondary),
+          ),
+        ),
+        _mqlStatRow(
+          label: 'Pot',
+          trailing: Text('KES ${bet.totalPot.toStringAsFixed(2)}',
+              style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: FanColors.primary)),
+        ),
+      ],
+      pillLabel: bet.status.toUpperCase(),
+      pillColor: bet.isActive
+          ? FanColors.primary
+          : (bet.isSettled ? FanColors.secondary : FanColors.away),
+      progress: null,
+    ),
+  );
+}
 
   Widget _betSideBox(
       {required String label,
