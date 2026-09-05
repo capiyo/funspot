@@ -5451,6 +5451,7 @@ class FixturesPageState extends State<FixturesPage>
   Timer? _threeMinRefreshTimer; // was an unnamed inline Timer.periodic before
   bool _backgroundWorkPaused = false;
   StreamSubscription<List<Fixture>>? _appCacheSubscription;
+  final Map<String, List<_MqlPersonData>> _mockPersonCache = {};
   Timer? _commentPollTimer;
   bool _showPledgesTab = true;
   bool _isProcessingPayment = false;
@@ -5577,6 +5578,32 @@ class FixturesPageState extends State<FixturesPage>
       _initializeLiveCommentary();
     });
   }
+
+  /// Deterministically generates (and caches) 3 mock "fan" fillers for a
+/// fixture, seeded off the fixtureId so the same names/picks are returned
+/// every time — never regenerated on rebuild, so nothing flickers.
+List<_MqlPersonData> _getMockFillers(Fixture fixture, int count) {
+  final fixtureId = fixture.matchId;
+
+  if (!_mockPersonCache.containsKey(fixtureId)) {
+    final seededRandom = Random(fixtureId.hashCode);
+    final picks = ['home_team', 'away_team', 'draw'];
+
+    _mockPersonCache[fixtureId] = List.generate(3, (i) {
+      final name = _sampleUsernames[seededRandom.nextInt(_sampleUsernames.length)];
+      final sel = picks[seededRandom.nextInt(picks.length)];
+      return _MqlPersonData(
+        name: name,
+        subtitle: 'fan',
+        pick: _getVoteDisplayText(sel, fixture.homeTeam, fixture.awayTeam),
+        color: _getVoteColor(sel),
+        amount: null,
+      );
+    });
+  }
+
+  return _mockPersonCache[fixtureId]!.take(count).toList();
+}
 
   void _loadFromAppCache() {
     if (!AppCache.isLoaded) return;
@@ -6571,20 +6598,11 @@ class FixturesPageState extends State<FixturesPage>
     }
   }
 
-  // Tier 4: mock, if everything above is empty
-  if (people.isEmpty) {
-    final picks = ['home_team', 'away_team', 'draw'];
-    people = List.generate(3, (i) {
-      final name = _sampleUsernames[_random.nextInt(_sampleUsernames.length)];
-      final sel = picks[_random.nextInt(picks.length)];
-      return _MqlPersonData(
-        name: name,
-        subtitle: 'fan',
-        pick: _getVoteDisplayText(sel, fixture.homeTeam, fixture.awayTeam),
-        color: _getVoteColor(sel),
-        amount: null,
-      );
-    });
+  // Tier 4: top up to 3 with STABLE mock fillers — if there's 1 real
+  // person, only 2 mocks get added (not a fresh random 3 every rebuild).
+  if (people.length < 3) {
+    final needed = 3 - people.length;
+    people = [...people, ..._getMockFillers(fixture, needed)];
   }
 
   // Backgroundless — no Container decoration, just the row of mini cards

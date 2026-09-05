@@ -565,6 +565,7 @@ class _HistoryPageState extends State<HistoryPage>
   bool _loadingLiveGames = false;
   String _error = '';
   String _activeTab = 'history';
+  final Map<String, List<_MiniPersonColumn>> _mockPersonCache = {};
 
   Timer? _refreshTimer;
   StreamSubscription? _appCacheSubscription;
@@ -603,85 +604,77 @@ class _HistoryPageState extends State<HistoryPage>
     return selection ?? '';
   }
 
-  Widget? _buildTopThreeForHistoryItem(HistoryItem item) {
-    final fixtureId = item.fixtureId;
-    List<Widget> people = [];
+ Widget? _buildTopThreeForHistoryItem(HistoryItem item) {
+  final fixtureId = item.fixtureId;
+  List<Widget> people = [];
 
-    // Tier 1: voters
-    if (item.voters.isNotEmpty) {
-      people = item.voters.take(3).map((v) {
-        final isMe = v.userId == widget.userId;
+  // Tier 1: voters
+  if (item.voters.isNotEmpty) {
+    people = item.voters.take(3).map((v) {
+      final isMe = v.userId == widget.userId;
+      return _MiniPersonColumn(
+        name: isMe ? 'You' : v.userName,
+        subtitle: 'voted',
+        pick: _pickLabel(v.selection, item.homeTeam, item.awayTeam),
+        color: _pickColor(v.selection, item.homeTeam, item.awayTeam),
+      );
+    }).toList();
+  }
+
+  // Tier 2: pledges
+  if (people.isEmpty) {
+    final pledges = _pledgesCache[fixtureId] ?? [];
+    if (pledges.isNotEmpty) {
+      people = pledges.take(3).map((p) {
+        final userId =
+            p['user_id']?.toString() ?? p['userId']?.toString() ?? '';
+        final userName =
+            p['user_name']?.toString() ?? p['userName']?.toString() ?? 'Fan';
+        final selection = p['selection']?.toString();
+        final isMe = userId == widget.userId;
         return _MiniPersonColumn(
-          name: isMe ? 'You' : v.userName,
-          subtitle: 'voted',
-          pick: _pickLabel(v.selection, item.homeTeam, item.awayTeam),
-          color: _pickColor(v.selection, item.homeTeam, item.awayTeam),
+          name: isMe ? 'You' : userName,
+          subtitle: 'pledged',
+          pick: _pickLabel(selection, item.homeTeam, item.awayTeam),
+          color: _pickColor(selection, item.homeTeam, item.awayTeam),
         );
       }).toList();
     }
-
-    // Tier 2: pledges
-    if (people.isEmpty) {
-      final pledges = _pledgesCache[fixtureId] ?? [];
-      if (pledges.isNotEmpty) {
-        people = pledges.take(3).map((p) {
-          final userId =
-              p['user_id']?.toString() ?? p['userId']?.toString() ?? '';
-          final userName =
-              p['user_name']?.toString() ?? p['userName']?.toString() ?? 'Fan';
-          final selection = p['selection']?.toString();
-          final isMe = userId == widget.userId;
-          return _MiniPersonColumn(
-            name: isMe ? 'You' : userName,
-            subtitle: 'pledged',
-            pick: _pickLabel(selection, item.homeTeam, item.awayTeam),
-            color: _pickColor(selection, item.homeTeam, item.awayTeam),
-          );
-        }).toList();
-      }
-    }
-
-    // Tier 3: comments
-    if (people.isEmpty) {
-      final comments = _fixtureComments[fixtureId] ?? item.comments;
-      if (comments.isNotEmpty) {
-        people = comments.take(3).map((c) {
-          final isMe = c.userId == widget.userId;
-          return _MiniPersonColumn(
-            name: isMe ? 'You' : c.username,
-            subtitle: 'commented',
-            pick: _pickLabel(c.selection, item.homeTeam, item.awayTeam),
-            color: _pickColor(c.selection, item.homeTeam, item.awayTeam),
-          );
-        }).toList();
-      }
-    }
-
-    // Tier 4: mock, if voters/pledges/comments are all empty
-    if (people.isEmpty) {
-      final picks = ['home_team', 'away_team', 'draw'];
-      people = List.generate(3, (i) {
-        final name = _sampleUsernames[_random.nextInt(_sampleUsernames.length)];
-        final sel = picks[_random.nextInt(picks.length)];
-        return _MiniPersonColumn(
-          name: name,
-          subtitle: 'fan',
-          pick: _pickLabel(sel, item.homeTeam, item.awayTeam),
-          color: _pickColor(sel, item.homeTeam, item.awayTeam),
-        );
-      });
-    }
-
-    return Row(
-      children: [
-        for (int i = 0; i < people.length; i++) ...[
-          if (i > 0) const SizedBox(width: 14),
-          Expanded(child: people[i]),
-        ],
-      ],
-    );
   }
 
+  // Tier 3: comments
+  if (people.isEmpty) {
+    final comments = _fixtureComments[fixtureId] ?? item.comments;
+    if (comments.isNotEmpty) {
+      people = comments.take(3).map((c) {
+        final isMe = c.userId == widget.userId;
+        return _MiniPersonColumn(
+          name: isMe ? 'You' : c.username,
+          subtitle: 'commented',
+          pick: _pickLabel(c.selection, item.homeTeam, item.awayTeam),
+          color: _pickColor(c.selection, item.homeTeam, item.awayTeam),
+        );
+      }).toList();
+    }
+  }
+
+  // Tier 4: top up to 3 with STABLE mock fillers — if there's already 1 or 2
+  // real people, only the missing seats get mocks (not a fresh random 3
+  // every rebuild).
+  if (people.length < 3) {
+    final needed = 3 - people.length;
+    people = [...people, ..._getMockFillersForHistoryItem(item, needed)];
+  }
+
+  return Row(
+    children: [
+      for (int i = 0; i < people.length; i++) ...[
+        if (i > 0) const SizedBox(width: 14),
+        Expanded(child: people[i]),
+      ],
+    ],
+  );
+}
   // Sample data for mock comments
   final List<String> _sampleUsernames = [
     '⚽ GoalMachine',
@@ -1141,6 +1134,33 @@ class _HistoryPageState extends State<HistoryPage>
       debugPrint('❌ Error loading history: $e');
     }
   }
+
+  /// Deterministically generates (and caches) mock "fan" fillers for a
+/// history item, seeded off the fixtureId so the same names/picks are
+/// returned every time — never regenerated on rebuild, so nothing jitters.
+List<_MiniPersonColumn> _getMockFillersForHistoryItem(
+    HistoryItem item, int count) {
+  final fixtureId = item.fixtureId;
+
+  if (!_mockPersonCache.containsKey(fixtureId)) {
+    final seededRandom = Random(fixtureId.hashCode);
+    final picks = ['home_team', 'away_team', 'draw'];
+
+    _mockPersonCache[fixtureId] = List.generate(3, (i) {
+      final name =
+          _sampleUsernames[seededRandom.nextInt(_sampleUsernames.length)];
+      final sel = picks[seededRandom.nextInt(picks.length)];
+      return _MiniPersonColumn(
+        name: name,
+        subtitle: 'fan',
+        pick: _pickLabel(sel, item.homeTeam, item.awayTeam),
+        color: _pickColor(sel, item.homeTeam, item.awayTeam),
+      );
+    });
+  }
+
+  return _mockPersonCache[fixtureId]!.take(count).toList();
+}
 
   void _loadLiveGamesFromCache() {
     if (!mounted) return;

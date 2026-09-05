@@ -15,6 +15,264 @@ import '../../models/user_channel.dart';
 // ============================================================================
 // USER DATA MODEL
 // ============================================================================
+class _WebLeaderboardMemberCard extends StatelessWidget {
+  final WebChannelMember member;
+  final int rank;
+  final int maxPoints;
+  final bool isYou;
+
+  const _WebLeaderboardMemberCard({
+    required this.member,
+    required this.rank,
+    required this.maxPoints,
+    required this.isYou,
+  });
+
+  double get _winRate =>
+      member.totalVotes > 0 ? member.correctVotes / member.totalVotes : 0.0;
+
+  int get _starCount => (_winRate * 5).round().clamp(0, 5);
+
+  double get _pointsFraction =>
+      maxPoints > 0 ? (member.seasonPoints / maxPoints).clamp(0.0, 1.0) : 0.0;
+
+  Color get _rankColor {
+    if (rank == 1) return const Color(0xFFFFC107);
+    if (rank == 2) return const Color(0xFFB0BEC5);
+    if (rank == 3) return const Color(0xFFCD7F32);
+    return FanColors.textTertiary;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: FanColors.surface,
+        borderRadius: BorderRadius.circular(10),
+        border:
+            Border.all(color: FanColors.border.withOpacity(0.3), width: 0.5),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Avatar block with small rank number, like mql5's numbered avatar tile
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: FanColors.primaryDim,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Stack(
+              children: [
+                Center(
+                  child: Text(
+                    member.username.isNotEmpty
+                        ? member.username[0].toUpperCase()
+                        : '?',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: FanColors.primary,
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 2,
+                  bottom: 2,
+                  child: Text(
+                    '$rank',
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                      color: FanColors.primary.withOpacity(0.6),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Name row
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        member.username,
+                        style: FanTypography.body.copyWith(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: FanColors.textPrimary,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (isYou) ...[
+                      const SizedBox(width: 5),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 4, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: FanColors.primaryMuted,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          'You',
+                          style: FanTypography.caption.copyWith(
+                            fontSize: 7,
+                            fontWeight: FontWeight.w600,
+                            color: FanColors.primary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 4),
+
+                // Rating row — stars + vote count, mirrors "Rating ★★★★★ (2346)"
+                _statRow(
+                  label: 'Rating',
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ...List.generate(
+                          5,
+                          (i) => Icon(
+                                i < _starCount ? Icons.star : Icons.star_border,
+                                size: 10,
+                                color: i < _starCount
+                                    ? Colors.amber
+                                    : FanColors.border,
+                              )),
+                      const SizedBox(width: 4),
+                      Text(
+                        '(${member.totalVotes})',
+                        style: FanTypography.caption.copyWith(
+                          fontSize: 9,
+                          color: FanColors.textTertiary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 2),
+
+                // Votes row (correct/total + win rate %)
+                _statRow(
+                  label: 'Votes',
+                  value: '${member.correctVotes}/${member.totalVotes}',
+                  percentText: '${(_winRate * 100).round()}%',
+                ),
+                const SizedBox(height: 2),
+
+                // Messages row
+                _statRow(
+                  label: 'Messages',
+                  value: '${member.msgCount}',
+                ),
+                const SizedBox(height: 2),
+
+                // Points row
+                _statRow(
+                  label: 'Points',
+                  value: '${member.seasonPoints}',
+                ),
+                const SizedBox(height: 6),
+
+                // Bottom rank badge + progress bar
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: _rankColor.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        rank <= 3 ? ['🥇', '🥈', '🥉'][rank - 1] : '#$rank',
+                        style: TextStyle(
+                          fontSize: rank <= 3 ? 10 : 8,
+                          fontWeight: FontWeight.w700,
+                          color: _rankColor,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(2),
+                        child: LinearProgressIndicator(
+                          value: _pointsFraction,
+                          minHeight: 3,
+                          backgroundColor: FanColors.border.withOpacity(0.3),
+                          valueColor: AlwaysStoppedAnimation(_rankColor),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _statRow(
+      {required String label,
+      String? value,
+      String? percentText,
+      Widget? trailing}) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 60,
+          child: Text(
+            label,
+            style: FanTypography.caption.copyWith(
+              fontSize: 9,
+              color: FanColors.textTertiary,
+            ),
+          ),
+        ),
+        if (trailing != null)
+          trailing
+        else ...[
+          Text(
+            value ?? '',
+            style: FanTypography.body.copyWith(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: FanColors.textPrimary,
+            ),
+          ),
+          if (percentText != null) ...[
+            const Spacer(),
+            Text(
+              percentText,
+              style: FanTypography.caption.copyWith(
+                fontSize: 9,
+                fontWeight: FontWeight.w600,
+                color: FanColors.textTertiary,
+              ),
+            ),
+          ],
+        ],
+      ],
+    );
+  }
+}
 
 class WebUserData {
   final String userId;
@@ -911,7 +1169,7 @@ class _WebProfilePanelState extends State<WebProfilePanel>
   // CHANNEL FRAGMENT
   // ==========================================================================
 
-  Widget _buildChannelFragment(int channelIndex) {
+   Widget _buildChannelFragment(int channelIndex) {
     if (_userChannels.isEmpty) {
       return Center(
         child: Column(
@@ -1046,6 +1304,8 @@ class _WebProfilePanelState extends State<WebProfilePanel>
             ),
           ),
           const SizedBox(height: 6),
+
+          // Members list - leaderboard cards
           Expanded(
             child: sortedMembers.isEmpty
                 ? Center(
@@ -1061,143 +1321,12 @@ class _WebProfilePanelState extends State<WebProfilePanel>
                     padding: const EdgeInsets.symmetric(vertical: 2),
                     itemBuilder: (context, index) {
                       final member = sortedMembers[index];
-                      final isTop3 = index < 3;
-                      final rankEmojis = ['🥇', '🥈', '🥉'];
-
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 2),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: isTop3
-                              ? FanColors.primaryDim
-                              : FanColors.surfaceSunken,
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(
-                            color: isTop3
-                                ? FanColors.borderActive
-                                : FanColors.border,
-                            width: 0.5,
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 18,
-                              alignment: Alignment.center,
-                              child: isTop3
-                                  ? Text(
-                                      rankEmojis[index],
-                                      style: const TextStyle(fontSize: 10),
-                                    )
-                                  : Text(
-                                      '#${index + 1}',
-                                      style: FanTypography.caption.copyWith(
-                                        color: FanColors.textTertiary
-                                            .withOpacity(0.4),
-                                      ),
-                                    ),
-                            ),
-                            const SizedBox(width: 4),
-                            Container(
-                              width: 20,
-                              height: 20,
-                              decoration: BoxDecoration(
-                                color: FanColors.primaryDim,
-                                shape: BoxShape.circle,
-                              ),
-                              child: Center(
-                                child: Text(
-                                  member.username.isNotEmpty
-                                      ? member.username[0].toUpperCase()
-                                      : '?',
-                                  style: FanTypography.caption.copyWith(
-                                    fontSize: 8,
-                                    fontWeight: FontWeight.w600,
-                                    color: FanColors.primary,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    member.username,
-                                    style: FanTypography.body.copyWith(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w600,
-                                      color: FanColors.textPrimary,
-                                    ),
-                                  ),
-                                  Row(
-                                    children: [
-                                      Icon(Icons.check_circle_outline,
-                                          size: 7,
-                                          color: FanColors.textTertiary),
-                                      const SizedBox(width: 2),
-                                      Text(
-                                        '${member.correctVotes}/${member.totalVotes}',
-                                        style: FanTypography.caption.copyWith(
-                                          fontSize: 7,
-                                          color: FanColors.textTertiary,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 5),
-                                      Icon(Icons.chat_bubble_outline,
-                                          size: 7,
-                                          color: FanColors.textTertiary),
-                                      const SizedBox(width: 2),
-                                      Text(
-                                        '${member.msgCount}',
-                                        style: FanTypography.caption.copyWith(
-                                          fontSize: 7,
-                                          color: FanColors.textTertiary,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: isTop3
-                                    ? FanColors.primary
-                                    : FanColors.surface,
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.star,
-                                    size: 6,
-                                    color: isTop3
-                                        ? Colors.white
-                                        : FanColors.textTertiary,
-                                  ),
-                                  const SizedBox(width: 2),
-                                  Text(
-                                    '${member.seasonPoints}',
-                                    style: FanTypography.caption.copyWith(
-                                      fontSize: 7,
-                                      fontWeight: FontWeight.w600,
-                                      color: isTop3
-                                          ? Colors.white
-                                          : FanColors.textPrimary,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
+                      final maxPoints = sortedMembers.first.seasonPoints;
+                      return _WebLeaderboardMemberCard(
+                        member: member,
+                        rank: index + 1,
+                        maxPoints: maxPoints,
+                        isYou: member.userId == _viewingUserId && _isCurrentUser,
                       );
                     },
                   ),
