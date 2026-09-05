@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:video_thumbnail/video_thumbnail.dart';
+import '../../services/video_thumb.dart'; // adjust path to wherever you put it, e.g. '../../services/video_thumb.dart'
 import 'package:path_provider/path_provider.dart';
 import '../../services/api_services.dart';
 import '../../services/notification_service.dart';
@@ -110,9 +110,8 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
       final bool isValid = _validateByteSize(bytes, 50);
       if (!isValid) return;
 
-      // Show the preview RIGHT AWAY (fallback black box + play icon) instead
-      // of waiting for thumbnail generation, which can take several seconds
-      // and was previously blocking the very first render of the preview.
+      // Show the preview immediately with the fallback icon; upgrade it
+      // with a real snapshot once generation finishes below.
       setState(() {
         _selectedVideoBytes = bytes;
         _selectedVideoName = video.name;
@@ -122,44 +121,20 @@ class __AddPostModalContentState extends State<_AddPostModalContent> {
         _isImageSelected = false;
         _selectedImageBytes = null;
         _selectedImageName = null;
-        _isGeneratingThumbnail = !kIsWeb;
+        _isGeneratingThumbnail = true;
         _message = "";
       });
 
-      if (kIsWeb) {
-        // video_thumbnail has no web implementation — the fallback
-        // play-icon preview set above is the final state on web.
-        return;
-      }
+      final thumbBytes = await generateVideoThumbnail(
+        videoBytes: bytes, // used on web
+        videoPath: video.path, // used on mobile
+      );
 
-      // Generate the real thumbnail in the background and upgrade the
-      // preview once it's ready, without blocking anything else.
-      Uint8List? thumbBytes;
-      String? thumbName;
-      try {
-        final tempDir = await getTemporaryDirectory();
-        final String? thumbnailPath = await VideoThumbnail.thumbnailFile(
-          video: video.path,
-          thumbnailPath: tempDir.path,
-          imageFormat: ImageFormat.JPEG,
-          quality: 75,
-        );
-        if (thumbnailPath != null) {
-          final thumbFile = File(thumbnailPath);
-          thumbBytes = await thumbFile.readAsBytes();
-          thumbName = thumbnailPath.split('/').last;
-        }
-      } catch (e) {
-        debugPrint('⚠️ Thumbnail generation failed: $e');
-      }
-
-      // Guard against the user clearing/changing the video while the
-      // thumbnail was still generating.
       if (!mounted || _selectedVideoBytes != bytes) return;
 
       setState(() {
         _videoThumbnailBytes = thumbBytes;
-        _videoThumbnailName = thumbName;
+        _videoThumbnailName = thumbBytes != null ? 'thumb.jpg' : null;
         _isGeneratingThumbnail = false;
       });
     } catch (e) {

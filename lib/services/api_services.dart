@@ -363,6 +363,112 @@ class ApiService {
   }
 
   // ==========================================================================
+  // POST METHODS — UPDATE & DELETE (FIXED for ownership validation)
+  // ==========================================================================
+
+  /// Updates a post's caption.
+  /// Requires userId for ownership validation on the server.
+  static Future<bool> updatePostCaption(
+    String postId,
+    String newCaption,
+    String userId,
+  ) async {
+    try {
+      Response response = await _dio.put(
+        '/api/posts/$postId', // Removed /caption suffix to match route
+        data: {
+          'caption': newCaption,
+          'user_id': userId, // Required for ownership validation
+        },
+      );
+      return response.data['success'] == true;
+    } on DioException catch (e) {
+      debugPrint('Error updating caption: ${e.message}');
+      return false;
+    }
+  }
+
+  /// Deletes a single post.
+  /// Requires userId for ownership validation on the server.
+  static Future<bool> deletePost(
+    String postId,
+    String userId,
+  ) async {
+    try {
+      Response response = await _dio.delete(
+        '/api/posts/$postId',
+        data: {'user_id': userId}, // Required for ownership validation
+      );
+      return response.data['success'] == true;
+    } on DioException catch (e) {
+      debugPrint('Error deleting post: ${e.message}');
+      return false;
+    }
+  }
+
+  /// Deletes all posts by a user.
+  /// Requires requestingUserId for authorization validation on the server.
+  static Future<bool> deletePostsByUser(
+    String userId, // The user whose posts to delete
+    String requestingUserId, // The user making the request
+  ) async {
+    try {
+      Response response = await _dio.delete(
+        '/api/posts/user/$userId',
+        data: {'requesting_user_id': requestingUserId},
+      );
+      return response.data['success'] == true;
+    } on DioException catch (e) {
+      debugPrint('Error deleting user posts: ${e.message}');
+      return false;
+    }
+  }
+
+  /// Likes a post.
+  /// userName is optional (server accepts either way).
+  static Future<Map<String, dynamic>> likePost(
+    String postId,
+    String userId, {
+    String? userName,
+  }) async {
+    try {
+      Response response = await _dio.post(
+        '/api/posts/$postId/like',
+        data: {
+          'user_id': userId,
+          if (userName != null) 'user_name': userName,
+        },
+      );
+      return response.data;
+    } on DioException catch (e) {
+      debugPrint('Error liking post: ${e.message}');
+      return {'success': false};
+    }
+  }
+
+  /// Unlikes a post.
+  /// userName is optional (server accepts either way).
+  static Future<Map<String, dynamic>> unlikePost(
+  String postId,
+  String userId, {
+  String? userName,
+}) async {
+  try {
+    Response response = await _dio.post(
+      '/api/posts/$postId/unlike',
+      data: {
+        'user_id': userId,
+        if (userName != null) 'user_name': userName,
+      },
+    );
+    return response.data;
+  } on DioException catch (e) {
+    debugPrint('Error unliking post: ${e.message}');
+    return {'success': false};
+  }
+}
+
+  // ==========================================================================
   // CHAT MEDIA UPLOAD METHODS
   // ==========================================================================
 
@@ -787,7 +893,7 @@ class ApiService {
   }
 
   // ==========================================================================
-  // EXISTING POST METHODS (unchanged)
+  // EXISTING POST METHODS
   // ==========================================================================
 
   static Future<Map<String, dynamic>> getPosts({
@@ -832,7 +938,7 @@ class ApiService {
   }) async {
     try {
       Response response = await _dio.get(
-        '/api/posts/user/$userId',
+        '/api/posts/user/$userId/all',
         queryParameters: {'page': page, 'limit': limit},
       );
       return {
@@ -843,30 +949,6 @@ class ApiService {
       };
     } on DioException catch (e) {
       throw Exception('Error fetching user posts: ${e.message}');
-    }
-  }
-
-  static Future<bool> deletePost(String postId) async {
-    try {
-      Response response = await _dio.delete('/api/posts/$postId');
-      return response.data['success'] == true;
-    } on DioException catch (e) {
-      debugPrint('Error deleting post: ${e.message}');
-      return false;
-    }
-  }
-
-  static Future<bool> updatePostCaption(
-      String postId, String newCaption) async {
-    try {
-      Response response = await _dio.put(
-        '/api/posts/$postId/caption',
-        data: {'caption': newCaption},
-      );
-      return response.data['success'] == true;
-    } on DioException catch (e) {
-      debugPrint('Error updating caption: ${e.message}');
-      return false;
     }
   }
 

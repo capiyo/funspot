@@ -225,7 +225,7 @@ class _PostCommentsState extends State<PostComments> {
       }
 
       // ✅ SECOND: Fetch from API
-     final url = '$_apiBaseUrl/comments/posts/${widget.post.id}/comments';
+     final url = '$_apiBaseUrl/posts/${widget.post.id}/comments';
       final headers = _getHeaders();
 
       print('🌐 Fetching from API: $url');
@@ -951,7 +951,7 @@ class _PostCommentsState extends State<PostComments> {
     });
 
     try {
-    final url = '$_apiBaseUrl/comments/posts/${widget.post.id}/comments';
+   final url = '$_apiBaseUrl/posts/${widget.post.id}/comments';
       final headers = _getHeaders();
 
       final parentCommentId = _replyingTo?['id']?.toString();
