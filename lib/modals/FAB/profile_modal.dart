@@ -371,6 +371,10 @@ class _SwipeableProfileModalState extends State<SwipeableProfileModal>
   final FocusNode _nicknameFocus = FocusNode();
   final FocusNode _clubFocus = FocusNode();
   final FocusNode _countryFocus = FocusNode();
+  // Add near other state vars
+bool _profileExists = false;
+  
+
 
   // Balance
   double _balance = 0.0;
@@ -458,10 +462,9 @@ class _SwipeableProfileModalState extends State<SwipeableProfileModal>
 // LOAD USER DATA - HANDLES BOTH OBJECT AND ARRAY
 // ============================================================================
 
-  Future<void> _loadUserData() async {
+Future<void> _loadUserData() async {
   setState(() => _isLoading = true);
 
-  // ✅ Instant paint from AppCache if this is the current user and cache matches
   if (_isCurrentUser &&
       AppCache.profile != null &&
       (AppCache.profile!['user_id']?.toString() ??
@@ -471,6 +474,7 @@ class _SwipeableProfileModalState extends State<SwipeableProfileModal>
     try {
       final cachedUser = UserData.fromJson(AppCache.profile!);
       _applyUserData(cachedUser);
+      _profileExists = true; // ✅ positive from cache
       debugPrint('⚡ Loaded profile instantly from AppCache');
     } catch (e) {
       debugPrint('⚠️ Failed to apply cached profile: $e');
@@ -494,6 +498,7 @@ class _SwipeableProfileModalState extends State<SwipeableProfileModal>
       if (decoded is List) {
         if (decoded.isEmpty) {
           debugPrint('📭 No profile found - going to edit mode');
+          _profileExists = false; // ✅ negative
           setState(() {
             _isLoading = false;
             _isEditing = true;
@@ -504,33 +509,35 @@ class _SwipeableProfileModalState extends State<SwipeableProfileModal>
             Map<String, dynamic>.from(decoded.first as Map);
         final user = UserData.fromJson(userMap);
         _applyUserData(user);
-        if (_isCurrentUser) await AppCache.saveProfile(userMap); // ✅ keep cache fresh
+        _profileExists = true; // ✅ positive
+        if (_isCurrentUser) await AppCache.saveProfile(userMap);
       } else if (decoded is Map) {
         final Map<String, dynamic> userMap =
             Map<String, dynamic>.from(decoded);
         final user = UserData.fromJson(userMap);
         _applyUserData(user);
-        if (_isCurrentUser) await AppCache.saveProfile(userMap); // ✅ keep cache fresh
+        _profileExists = true; // ✅ positive
+        if (_isCurrentUser) await AppCache.saveProfile(userMap);
       } else {
+        _profileExists = false; // ✅ negative
         setState(() {
           _isLoading = false;
           _isEditing = true;
         });
       }
     } else if (response.statusCode == 404) {
+      _profileExists = false; // ✅ negative
       setState(() {
         _isLoading = false;
         _isEditing = true;
       });
     } else {
-      // ✅ Network failed but we already painted from cache above (if any) — don't force edit mode
       if (_userData == null) {
         setState(() => _isLoading = false);
       }
     }
   } catch (e) {
     debugPrint('❌ Load user error: $e');
-    // ✅ If cache already populated the view, just stop the spinner silently
     if (_userData == null) {
       setState(() => _isLoading = false);
     } else {
@@ -578,10 +585,28 @@ class _SwipeableProfileModalState extends State<SwipeableProfileModal>
     setState(() => _isSaving = true);
 
     try {
+      // ✅ Branch phone source on profile existence
+      String phone;
+      if (_profileExists && _userData != null && _userData!.phone.isNotEmpty) {
+        // Positive — profile already has a phone, use it
+        phone = _userData!.phone;
+        debugPrint('📞 Using phone from existing profile: $phone');
+      } else {
+        // Negative — no profile yet, fetch from users collection
+        phone = await _resolvePhoneFromUsersCollection();
+        debugPrint('📞 Using phone from users collection: $phone');
+      }
+
+      if (phone.isEmpty) {
+        ToastHelper.showError('No phone number found on your account');
+        setState(() => _isSaving = false);
+        return;
+      }
+
       final body = {
         'user_id': widget.userId,
         'username': widget.username,
-        'phone': widget.phone,
+        'phone': phone,
         'nickname': nickname,
         'club_fan': club,
         'country_fan': country,
@@ -600,7 +625,6 @@ class _SwipeableProfileModalState extends State<SwipeableProfileModal>
       debugPrint('   URL: $url');
       debugPrint('   Body: ${jsonEncode(body)}');
 
-      // ✅ Use correct method
       final response = isNewUser
           ? await http
               .post(
@@ -624,7 +648,6 @@ class _SwipeableProfileModalState extends State<SwipeableProfileModal>
           mounted) {
         final decoded = jsonDecode(response.body);
 
-        // ✅ Convert Map<dynamic, dynamic> to Map<String, dynamic>
         Map<String, dynamic> userMap;
         if (decoded is List) {
           if (decoded.isEmpty) {
@@ -647,6 +670,7 @@ class _SwipeableProfileModalState extends State<SwipeableProfileModal>
           _userData = user;
           _balance = user.balance;
           _isEditing = false;
+          _profileExists = true; // ✅ now positive after successful save
         });
 
         widget.onUserUpdated?.call(user);
@@ -668,7 +692,6 @@ class _SwipeableProfileModalState extends State<SwipeableProfileModal>
       if (mounted) setState(() => _isSaving = false);
     }
   }
-
 // ============================================================================
 // HEADERS WITH AUTH TOKEN
 // ============================================================================
@@ -743,6 +766,36 @@ class _SwipeableProfileModalState extends State<SwipeableProfileModal>
       }
     }
   }
+
+  // ============================================================================
+// GET PHONE FROM USERS COLLECTION (auth endpoint) — NOT WIDGET PARAM, NOT FIREBASE
+// ============================================================================
+Future<String> _resolvePhoneFromUsersCollection() async {
+  try {
+    final response = await http
+        .get(
+          Uri.parse('$_api/auth/user/id/${widget.userId}'),
+          headers: _headers(),
+        )
+        .timeout(const Duration(seconds: 8));
+
+    debugPrint('📞 /auth/user/id status: ${response.statusCode}');
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      if (data['success'] == true) {
+        final phone = data['user']?['phone']?.toString().trim() ?? '';
+        debugPrint('📞 Phone from users collection: "$phone"');
+        return phone;
+      }
+    }
+    debugPrint('⚠️ /auth/user/id did not return success/phone');
+    return '';
+  } catch (e) {
+    debugPrint('❌ Failed to fetch phone from users collection: $e');
+    return '';
+  }
+}
 
   Future<void> _fetchSavedPhones() async {
     if (!_isCurrentUser) return;
