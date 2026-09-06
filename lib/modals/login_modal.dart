@@ -13,8 +13,6 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'dart:io' show Platform;
 import '../services/notification_service.dart';
 
-
-
 import '../services/auth_service.dart';
 
 // ============================================================================
@@ -312,6 +310,7 @@ class _LoginContentState extends State<_LoginContent> {
           name: 'LoginModal');
     }
   }
+
   // ─────────────────────────────────────────
   //  STEP 1 — SEND OTP (with PIN fallback)
   // ─────────────────────────────────────────
@@ -736,7 +735,7 @@ class _LoginContentState extends State<_LoginContent> {
           backgroundColor: FanColors.surface,
           shape: RoundedRectangleBorder(
               borderRadius: FanRadius.lgAll,
-              side:  BorderSide(color: FanColors.border)),
+              side: BorderSide(color: FanColors.border)),
           title: Text('Create Username', style: FanTypography.headline),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -756,16 +755,16 @@ class _LoginContentState extends State<_LoginContent> {
                   fillColor: FanColors.surfaceSunken,
                   border: OutlineInputBorder(
                     borderRadius: FanRadius.lgAll,
-                    borderSide:  BorderSide(color: FanColors.border),
+                    borderSide: BorderSide(color: FanColors.border),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: FanRadius.lgAll,
-                    borderSide:  BorderSide(color: FanColors.border),
+                    borderSide: BorderSide(color: FanColors.border),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: FanRadius.lgAll,
                     borderSide:
-                         BorderSide(color: FanColors.primary, width: 1.4),
+                        BorderSide(color: FanColors.primary, width: 1.4),
                   ),
                 ),
                 onChanged: (value) {
@@ -913,11 +912,11 @@ class _LoginContentState extends State<_LoginContent> {
         fillColor: FanColors.surfaceSunken,
         border: OutlineInputBorder(
           borderRadius: FanRadius.lgAll,
-          borderSide:  BorderSide(color: FanColors.border),
+          borderSide: BorderSide(color: FanColors.border),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: FanRadius.lgAll,
-          borderSide:  BorderSide(color: FanColors.border),
+          borderSide: BorderSide(color: FanColors.border),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: FanRadius.lgAll,
@@ -925,7 +924,7 @@ class _LoginContentState extends State<_LoginContent> {
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: FanRadius.lgAll,
-          borderSide:  BorderSide(color: FanColors.away),
+          borderSide: BorderSide(color: FanColors.away),
         ),
         contentPadding: const EdgeInsets.symmetric(
             horizontal: FanSpacing.base, vertical: FanSpacing.md),

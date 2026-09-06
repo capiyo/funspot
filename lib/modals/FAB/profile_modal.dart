@@ -1482,9 +1482,9 @@ class _SwipeableProfileModalState extends State<SwipeableProfileModal>
   // ==========================================================================
 
   bool _isValidPhone(String phone) {
-    final cleaned = phone.replaceAll(RegExp(r'[^0-9]'), '');
-    return RegExp(r'^(0|254)?[7-9][0-9]{8}$').hasMatch(cleaned);
-  }
+  final cleaned = phone.replaceAll(RegExp(r'[^0-9]'), '');
+  return RegExp(r'^(0|254)?[71][0-9]{8}$').hasMatch(cleaned);
+}
 
   Future<bool> _saveTopUpPhone(String phone) async {
     if (!_isCurrentUser) return false;
