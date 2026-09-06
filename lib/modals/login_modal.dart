@@ -1049,10 +1049,13 @@ class _LoginContentState extends State<_LoginContent> {
                         if (v == null || v.trim().isEmpty) return 'Required';
                         final cleaned =
                             v.trim().replaceAll(RegExp(r'[\s\-\(\)]'), '');
-                        if (cleaned.length < 5) return 'Too short';
-                        if (cleaned.length > 15) return 'Too long';
-                        if (!RegExp(r'^[0-9+]+$').hasMatch(cleaned))
-                          return 'Digits only';
+                        if (!RegExp(r'^[0-9]{7,12}$').hasMatch(cleaned)) {
+                          return 'Enter a valid phone number';
+                        }
+                        final e164 = _buildE164(v);
+                        if (!RegExp(r'^\+\d{10,15}$').hasMatch(e164)) {
+                          return 'Enter a valid phone number';
+                        }
                         return null;
                       },
                     ),
