@@ -688,6 +688,7 @@ class _SwipeableVotePledgeModalState extends State<SwipeableVotePledgeModal>
   // Vote state
   String? _selectedVoteOption;
   bool _isVoting = false;
+  final Set<String> _matchingSubFixtureBetIds = {};
 
   // Sub-fixtures expanded state
   final Map<String, bool> _expandedSubFixtureMarkets = {};
@@ -1068,6 +1069,248 @@ class _SwipeableVotePledgeModalState extends State<SwipeableVotePledgeModal>
       if (mounted) setState(() => _isLoadingBets = false);
     }
   }
+
+
+  Future<void> _matchSubFixturePledge(
+      SubFixtureMarket market, bet_service.SubFixturePledge pledge) async {
+    if (widget.channelId.isEmpty) {
+      ToastHelper.showWarning('Please join a group to match pledges');
+      Navigator.pop(context);
+      widget.onShowJoinGroups?.call();
+      return;
+    }
+
+    if (_isLive) {
+      ToastHelper.showWarning('Betting is disabled during live matches');
+      return;
+    }
+
+    if (_matchingSubFixtureBetIds.contains(pledge.id)) return;
+
+    await _fetchUserBalance(forceRefresh: true);
+
+    if (_userBalance < pledge.amount) {
+      final shortfall = pledge.amount - _userBalance;
+      ToastHelper.showInfo(
+          'Insufficient balance. You need KES ${shortfall.toStringAsFixed(2)} more.');
+      _showTopUpDialog(
+        onComplete: () async {
+          await _fetchUserBalance(forceRefresh: true);
+          if (_userBalance >= pledge.amount) {
+            _showSubFixtureMatchConfirmation(market, pledge);
+          } else {
+            ToastHelper.showError('Balance still insufficient after top up');
+          }
+        },
+      );
+      return;
+    }
+
+    _showSubFixtureMatchConfirmation(market, pledge);
+  }
+
+  void _showSubFixtureMatchConfirmation(
+      SubFixtureMarket market, bet_service.SubFixturePledge pledge) {
+    final isLineMarket = market.marketType == 'over_under_2_5';
+    final allOutcomes = isLineMarket
+        ? _Outcome.overUnder(market.line ?? 2.5)
+        : [
+            _Outcome(
+                key: 'home',
+                label: widget.fixture.homeTeam,
+                color: FanColors.primary),
+            _Outcome(
+                key: 'away',
+                label: widget.fixture.awayTeam,
+                color: FanColors.away),
+            _Outcome(key: 'none', label: 'None', color: FanColors.textTertiary),
+          ];
+
+    // Backend only forbids picking the SAME selection as the starter —
+    // for 3-way markets the finisher can pick either remaining option.
+    final available =
+        allOutcomes.where((o) => o.key != pledge.selection).toList();
+
+    String selectedKey = available.first.key;
+
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setStateDialog) {
+          bool isProcessing = false;
+
+          return AlertDialog(
+            backgroundColor: FanColors.surface,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            title: Row(
+              children: [
+                Icon(Icons.sports_score, color: FanColors.primary, size: 16),
+                const SizedBox(width: 6),
+                Text('Match Pledge',
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: FanColors.textPrimary)),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: FanColors.surfaceSunken,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: FanColors.border, width: 0.5),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(pledge.userName,
+                              style: TextStyle(
+                                  fontSize: 10, color: FanColors.textPrimary)),
+                          Text(
+                              'Picked ${_getSelectionDisplayForSubFixture(pledge.selection, market)}',
+                              style: TextStyle(
+                                  fontSize: 8, color: FanColors.primary)),
+                        ],
+                      ),
+                      Text('KES ${pledge.amount.toStringAsFixed(2)}',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: FanColors.primary)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text('Your pick',
+                    style:
+                        TextStyle(fontSize: 9, color: FanColors.textTertiary)),
+                const SizedBox(height: 6),
+                _OutcomeRow(
+                  outcomes: available,
+                  selected: selectedKey,
+                  locked: isProcessing,
+                  onSelect: (v) => setStateDialog(() => selectedKey = v),
+                  compact: true,
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                      color: FanColors.primaryDim,
+                      borderRadius: BorderRadius.circular(4)),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline,
+                          size: 10, color: FanColors.primary),
+                      const SizedBox(width: 3),
+                      Expanded(
+                        child: Text(
+                            'Stake must match: KES ${pledge.amount.toStringAsFixed(2)}',
+                            style: TextStyle(
+                                fontSize: 8, color: FanColors.primary)),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: isProcessing ? null : () => Navigator.pop(context),
+                child: Text('Cancel',
+                    style: TextStyle(color: FanColors.textSecondary)),
+              ),
+              ElevatedButton(
+                onPressed: isProcessing
+                    ? null
+                    : () async {
+                        setStateDialog(() => isProcessing = true);
+                        final success = await _executeSubFixtureMatch(
+                            market, pledge, selectedKey);
+                        if (context.mounted) Navigator.pop(context);
+                        if (!success) {
+                          // error toast already shown inside _executeSubFixtureMatch
+                        }
+                      },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: FanColors.primary,
+                  minimumSize: const Size(60, 28),
+                ),
+                child: isProcessing
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Text('Match'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<bool> _executeSubFixtureMatch(SubFixtureMarket market,
+      bet_service.SubFixturePledge pledge, String selection) async {
+    setState(() => _matchingSubFixtureBetIds.add(pledge.id));
+    try {
+      ToastHelper.showInfo('🔄 Matching pledge...');
+
+      final data = await bet_service.SubFixtureService.fillBet(
+        betId: pledge.id,
+        matchId: widget.fixture.matchId,
+        marketId: market.id,
+        finisherId: widget.userId,
+        finisherName: widget.username,
+        selection: selection,
+        amount: pledge.amount,
+        authToken: widget.authToken,
+      );
+
+      if (data['success'] == true) {
+        ToastHelper.showSuccess('✅ Pledge matched! 🎉');
+        await _fetchUserBalance(forceRefresh: true);
+        await _loadSubFixturePledges(market.id);
+        // force a re-fetch next time it's expanded, since loaded flag is sticky
+        _subFixturePledgesLoaded[market.id] = false;
+        await _loadSubFixturePledges(market.id);
+        return true;
+      } else {
+        ToastHelper.showError(data['message'] ?? 'Failed to match pledge');
+        return false;
+      }
+    } catch (e) {
+      debugPrint('❌ Sub-fixture match error: $e');
+      ToastHelper.showError('Network error: ${e.toString()}');
+      return false;
+    } finally {
+      if (mounted) setState(() => _matchingSubFixtureBetIds.remove(pledge.id));
+    }
+  }
+
+
+
+
+
+
+
+
+
+
+
+
 
   Future<void> _fetchUserBalance({bool forceRefresh = false}) async {
     if (!widget.isLoggedIn) {
@@ -1779,8 +2022,8 @@ class _SwipeableVotePledgeModalState extends State<SwipeableVotePledgeModal>
                           return;
                         }
 
-                        if (isWithdraw &&
-                            (phone.isEmpty || !_isValidPhoneNumber(phone))) {
+                        if (isWithdraw && (phone.isEmpty || !PaymentService.isValidPhoneNumber(phone))) {
+                             
                           ToastHelper.showWarning(
                               'Please enter a valid phone number');
                           return;
@@ -1955,9 +2198,12 @@ class _SwipeableVotePledgeModalState extends State<SwipeableVotePledgeModal>
     }
   }
 
-  bool _isValidPhoneNumber(String phone) {
+ // was: static bool _isValidPhoneNumber(String phone) {
+  static bool isValidPhoneNumber(String phone) {
     final cleaned = phone.replaceAll(RegExp(r'[^0-9]'), '');
-    final regex = RegExp(r'^(0|254)?[7-9][0-9]{8}$');
+    final regex = RegExp(
+      r'^(0|254)?(7[0-9]{8}|1(?:0[0-6]|1[0-5])[0-9]{6})$',
+    );
     return regex.hasMatch(cleaned);
   }
 
@@ -3094,7 +3340,7 @@ class _SwipeableVotePledgeModalState extends State<SwipeableVotePledgeModal>
     );
   }
 
-  Widget _buildSubFixtureCard(SubFixtureMarket market) {
+   Widget _buildSubFixtureCard(SubFixtureMarket market) {
     final isLineMarket = market.marketType == 'over_under_2_5';
     final outcomes = isLineMarket
         ? _Outcome.overUnder(market.line ?? 2.5)
@@ -3218,7 +3464,7 @@ class _SwipeableVotePledgeModalState extends State<SwipeableVotePledgeModal>
           // Expandable pledges list
           if (isExpanded) ...[
             const SizedBox(height: 8),
-             Divider(color: FanColors.border, height: 0.5),
+            Divider(color: FanColors.border, height: 0.5),
             const SizedBox(height: 6),
 
             // Filter chips - only show if pledges exist
@@ -3273,7 +3519,7 @@ class _SwipeableVotePledgeModalState extends State<SwipeableVotePledgeModal>
                 ),
                 const Spacer(),
                 if (isLoadingPledges)
-                   SizedBox(
+                  SizedBox(
                     width: 14,
                     height: 14,
                     child: CircularProgressIndicator(
@@ -3288,7 +3534,7 @@ class _SwipeableVotePledgeModalState extends State<SwipeableVotePledgeModal>
 
             // Pledges list or empty state
             if (isLoadingPledges)
-               Padding(
+              Padding(
                 padding: EdgeInsets.symmetric(vertical: 12),
                 child: Center(
                   child: SizedBox(
@@ -3388,6 +3634,13 @@ class _SwipeableVotePledgeModalState extends State<SwipeableVotePledgeModal>
                     market,
                   );
                   final selectionColor = pledge.selectionColor;
+                  final canMatch = !isMe &&
+                      pledge.status == 'open' &&
+                      market.isOpen &&
+                      !market.isSettled &&
+                      !_isLive;
+                  final isMatching =
+                      _matchingSubFixtureBetIds.contains(pledge.id);
 
                   return _PersonTile(
                     name: pledge.userName,
@@ -3395,8 +3648,7 @@ class _SwipeableVotePledgeModalState extends State<SwipeableVotePledgeModal>
                     accent: selectionColor,
                     subtitle: 'Pledged ${pledge.amount.toStringAsFixed(2)} KES',
                     badges: [
-                      if (isMe)
-                         _Badge(label: 'you', color: FanColors.primary),
+                      if (isMe) _Badge(label: 'you', color: FanColors.primary),
                       if (pledge.status == 'settled')
                         _Badge(
                           label: 'won',
@@ -3404,36 +3656,69 @@ class _SwipeableVotePledgeModalState extends State<SwipeableVotePledgeModal>
                           icon: Icons.check_circle,
                         ),
                     ],
-                    trailing: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: selectionColor.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            selectionDisplay,
-                            style: TextStyle(
-                              fontSize: 7,
-                              fontWeight: FontWeight.w600,
-                              color: selectionColor,
+                    trailing: canMatch
+                        ? GestureDetector(
+                            onTap: isMatching
+                                ? null
+                                : () => _matchSubFixturePledge(market, pledge),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: FanColors.primary,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: isMatching
+                                  ? const SizedBox(
+                                      width: 10,
+                                      height: 10,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 1.5,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : const Text(
+                                      'MATCH',
+                                      style: TextStyle(
+                                        fontSize: 8,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                            ),
+                          )
+                        : Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: selectionColor.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  selectionDisplay,
+                                  style: TextStyle(
+                                    fontSize: 7,
+                                    fontWeight: FontWeight.w600,
+                                    color: selectionColor,
+                                  ),
+                                ),
+                                Text(
+                                  'KES ${pledge.amount.toStringAsFixed(2)}',
+                                  style: TextStyle(
+                                    fontSize: 6,
+                                    color: FanColors.textTertiary,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                          Text(
-                            'KES ${pledge.amount.toStringAsFixed(2)}',
-                            style: TextStyle(
-                              fontSize: 6,
-                              color: FanColors.textTertiary,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
                   );
                 },
               ),

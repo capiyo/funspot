@@ -653,6 +653,14 @@ class PaymentService {
       return STKStatusResult.error(e.toString());
     }
   }
+  // was: static bool _isValidPhoneNumber(String phone) {
+  static bool isValidPhoneNumber(String phone) {
+    final cleaned = phone.replaceAll(RegExp(r'[^0-9]'), '');
+    final regex = RegExp(
+      r'^(0|254)?(7[0-9]{8}|1(?:0[0-6]|1[0-5])[0-9]{6})$',
+    );
+    return regex.hasMatch(cleaned);
+  }
 
   // ==========================================================================
   // ADMIN PAYOUT - Compute engagement payout

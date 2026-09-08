@@ -109,6 +109,8 @@ class BetService {
     }
   }
 
+  
+
   // ============================================================
   // GET OPEN BETS (Channel-Specific)
   // ============================================================
@@ -507,7 +509,11 @@ class SubFixturePledge {
 // ============================================================
 class SubFixtureService {
   static const String _api = 'https://clash-api-m5mr.onrender.com/api';
+  static const Str = 'https://clash-api-m5mr.onrender.com/api';
+  
+
   static const Duration _timeout = Duration(seconds: 15);
+  
 
   /// Get open sub-fixture bets for a match
   /// GET /api/sub_fixtures/sub-fixture/bets/open/:match_id
@@ -543,6 +549,7 @@ class SubFixtureService {
       return [];
     }
   }
+
 
   /// Get bets for a specific market
   /// GET /api/sub_fixtures/sub-fixture/bets/market/:match_id/:market_id

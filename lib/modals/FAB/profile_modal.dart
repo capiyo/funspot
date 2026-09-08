@@ -321,6 +321,29 @@ class UserData {
 }
 
 // ============================================================================
+// USERS-COLLECTION ACCOUNT SNAPSHOT
+// (phone / balance / total_votes as they exist today on the canonical
+// "users" collection, via GET /auth/user/id/{userId}. The backend already
+// keeps this collection in sync: cast_vote_handler increments total_votes
+// there on every vote, and finalize_fixture_result_handler increments
+// season_points/correct_votes there on settlement and mirrors them back
+// down onto each channel membership record.)
+// ============================================================================
+class _UsersCollectionSnapshot {
+  final String phone;
+  final double balance;
+  final int totalVotes;
+
+  const _UsersCollectionSnapshot({
+    required this.phone,
+    required this.balance,
+    required this.totalVotes,
+  });
+
+  static const empty = _UsersCollectionSnapshot(phone: '', balance: 0.0, totalVotes: 0);
+}
+
+// ============================================================================
 // MAIN MODAL
 // ============================================================================
 
@@ -503,6 +526,7 @@ Future<void> _loadUserData() async {
             _isLoading = false;
             _isEditing = true;
           });
+          _prefillFromUsersCollection();
           return;
         }
         final Map<String, dynamic> userMap =
@@ -524,6 +548,7 @@ Future<void> _loadUserData() async {
           _isLoading = false;
           _isEditing = true;
         });
+        _prefillFromUsersCollection();
       }
     } else if (response.statusCode == 404) {
       _profileExists = false; // ✅ negative
@@ -531,6 +556,7 @@ Future<void> _loadUserData() async {
         _isLoading = false;
         _isEditing = true;
       });
+      _prefillFromUsersCollection();
     } else {
       if (_userData == null) {
         setState(() => _isLoading = false);
@@ -556,6 +582,25 @@ Future<void> _loadUserData() async {
       _isLoading = false;
       _isEditing = false; // ✅ Show view mode for existing user
     });
+  }
+
+// ============================================================================
+// PREFILL FROM USERS COLLECTION (called once we know there's no profile yet)
+// Pulls balance + total_votes from the canonical "users" collection via
+// /auth/user/id/{userId} so the balance shown while completing the profile
+// (and the number_of_bets we save) reflect real account activity instead
+// of defaulting to 0.
+// ============================================================================
+  Future<void> _prefillFromUsersCollection() async {
+    if (!_isCurrentUser) return;
+    final snapshot = await _fetchUsersCollectionSnapshot();
+    _pendingAccountSnapshot = snapshot;
+    if (mounted && snapshot.balance > 0) {
+      setState(() {
+        _balance = snapshot.balance;
+        _isBalanceLoading = false;
+      });
+    }
   }
 
 // ============================================================================
@@ -585,16 +630,31 @@ Future<void> _loadUserData() async {
     setState(() => _isSaving = true);
 
     try {
-      // ✅ Branch phone source on profile existence
+      // ✅ Branch phone/balance/bets source on profile existence.
       String phone;
+      double balanceForSave;
+      int betsForSave;
+
       if (_profileExists && _userData != null && _userData!.phone.isNotEmpty) {
-        // Positive — profile already has a phone, use it
+        // Positive — profile already exists, keep using its own numbers.
+        // (Balance/points here are refreshed separately via PaymentService
+        // and the vote/settlement sync on the backend.)
         phone = _userData!.phone;
+        balanceForSave = _balance;
+        betsForSave = _userData?.numberOfBets ?? 0;
         debugPrint('📞 Using phone from existing profile: $phone');
       } else {
-        // Negative — no profile yet, fetch from users collection
-        phone = await _resolvePhoneFromUsersCollection();
-        debugPrint('📞 Using phone from users collection: $phone');
+        // Negative — first time creating a profile. Pull phone, balance,
+        // and total_votes straight from the canonical "users" collection
+        // (GET /auth/user/id/{userId}) instead of defaulting to 0, since
+        // the backend already keeps that collection up to date with every
+        // vote cast and every game settled.
+        final snapshot = _pendingAccountSnapshot ?? await _fetchUsersCollectionSnapshot();
+        phone = snapshot.phone;
+        balanceForSave = snapshot.balance;
+        betsForSave = snapshot.totalVotes;
+        debugPrint(
+            '📞 Using phone/balance/bets from users collection: $phone / KES $balanceForSave / $betsForSave votes');
       }
 
       if (phone.isEmpty) {
@@ -610,8 +670,8 @@ Future<void> _loadUserData() async {
         'nickname': nickname,
         'club_fan': club,
         'country_fan': country,
-        'balance': _balance,
-        'number_of_bets': _userData?.numberOfBets ?? 0,
+        'balance': balanceForSave,
+        'number_of_bets': betsForSave,
       };
 
       // ✅ CORRECT: New user = POST, Existing user = PUT
@@ -767,10 +827,24 @@ Future<void> _loadUserData() async {
     }
   }
 
+  // Cached snapshot fetched once we know a profile doesn't exist yet, so
+  // _saveProfile() doesn't have to re-hit the network right when the user
+  // taps "Complete Profile" (falls back to a fresh fetch if unavailable).
+  _UsersCollectionSnapshot? _pendingAccountSnapshot;
+
   // ============================================================================
-// GET PHONE FROM USERS COLLECTION (auth endpoint) — NOT WIDGET PARAM, NOT FIREBASE
+// GET PHONE + BALANCE + TOTAL_VOTES FROM USERS COLLECTION (auth endpoint)
+// NOT WIDGET PARAM, NOT FIREBASE.
+//
+// The "users" collection is the canonical source the backend keeps in sync:
+//   - cast_vote_handler increments users.total_votes on every vote
+//   - finalize_fixture_result_handler increments users.season_points /
+//     users.correct_votes on settlement, then mirrors those numbers back
+//     onto every channel membership record for that user.
+// So total_votes here already reflects the sum of the user's activity
+// across all their channels — no separate per-channel summation needed.
 // ============================================================================
-Future<String> _resolvePhoneFromUsersCollection() async {
+Future<_UsersCollectionSnapshot> _fetchUsersCollectionSnapshot() async {
   try {
     final response = await http
         .get(
@@ -783,19 +857,34 @@ Future<String> _resolvePhoneFromUsersCollection() async {
 
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
-      if (data['success'] == true) {
-        final phone = data['user']?['phone']?.toString().trim() ?? '';
-        debugPrint('📞 Phone from users collection: "$phone"');
-        return phone;
+      if (data['success'] == true && data['user'] is Map) {
+        final userMap = data['user'] as Map;
+        final phone = userMap['phone']?.toString().trim() ?? '';
+        final balance = (userMap['balance'] as num?)?.toDouble() ?? 0.0;
+        final totalVotes = (userMap['total_votes'] as num?)?.toInt() ?? 0;
+        debugPrint(
+            '📞 Users collection snapshot: phone="$phone" balance=$balance totalVotes=$totalVotes');
+        return _UsersCollectionSnapshot(
+          phone: phone,
+          balance: balance,
+          totalVotes: totalVotes,
+        );
       }
     }
-    debugPrint('⚠️ /auth/user/id did not return success/phone');
-    return '';
+    debugPrint('⚠️ /auth/user/id did not return success/user');
+    return _UsersCollectionSnapshot.empty;
   } catch (e) {
-    debugPrint('❌ Failed to fetch phone from users collection: $e');
-    return '';
+    debugPrint('❌ Failed to fetch account snapshot from users collection: $e');
+    return _UsersCollectionSnapshot.empty;
   }
 }
+
+  // Back-compat helper (still used by a couple of call sites below) that
+  // just needs the phone out of the same snapshot.
+  Future<String> _resolvePhoneFromUsersCollection() async {
+    final snapshot = await _fetchUsersCollectionSnapshot();
+    return snapshot.phone;
+  }
 
   Future<void> _fetchSavedPhones() async {
     if (!_isCurrentUser) return;
