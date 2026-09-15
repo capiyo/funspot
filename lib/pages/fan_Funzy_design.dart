@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 // ─────────────────────────────────────────────────────────────
-//  FanFunzy Design System · v6.0 — "SportPesa Light / SportPesa Night"
+//  FanFunzy Design System · v6.0 — "GreenPesa Light / GreenPesa Night"
 //  Same token names as v5.0 (FanColors.primary, FanColors.surface, …)
 //  but every token now resolves to a LIGHT or DARK value depending
 //  on FanColors.isDark. Nothing that references FanColors.xxx or
@@ -15,28 +15,18 @@ import 'package:flutter/material.dart';
 //  pages, drop the `const` keyword at that call site — the rest of
 //  the API (the names, how you call them) is unchanged.
 //
-//  Toggle theme anywhere with:
-//      FanTheme.controller.setDark(true / false);
-//  or:
-//      FanTheme.controller.toggle();
-//  Wrap MaterialApp in a ListenableBuilder on FanTheme.controller
-//  (see bottom of file) so the UI rebuilds when it changes.
-//
 //  DARK MODE UPDATE: dark mode is now flat — there is only ONE
 //  background color (the old card bg, 0xFF0F1E27). background,
 //  backgroundTint, surface, surfaceElevated, and surfaceSunken all
 //  resolve to that same value in dark mode, so canvas and cards no
 //  longer sit at different depths. Light mode is unchanged.
 //
-//  PALETTE SOURCE: recolored to match SportPesa — deep navy-slate
-//  brand color (#1F4255), warm orange accent, gold for
+//  PALETTE SOURCE: brand accents recolored to a green family based
+//  on #01FF01. Warm orange stays as the secondary accent, gold for
 //  jackpot/promo moments, red reserved for live/destructive states.
+//  The dark card/home background remains the original navy-slate
+//  0xFF0F1E27 — only bluish UI accents were swapped to green.
 // ─────────────────────────────────────────────────────────────
-
-/// Global light/dark switch. Flip this (via FanTheme.controller) and
-/// every FanColors / FanTypography / FanDecorations / FanGradients /
-/// FanShadows getter below immediately reflects the new theme.
-import 'package:flutter/material.dart';
 
 /// Global light/dark switch. Now fully OS-driven — there is no manual
 /// override. FanColors.isDark (and everything derived from it) updates
@@ -85,16 +75,13 @@ class FanThemeController extends ChangeNotifier with WidgetsBindingObserver {
 class FanColors {
   FanColors._();
 
-  /// Flip via FanTheme.controller.setDark(...) — don't set directly
-  /// unless you also call FanTheme.controller.setDark to keep the
-  /// two in sync.
+  /// Flip via FanTheme.controller — don't set directly unless you
+  /// also call FanTheme.controller to keep the two in sync.
   static bool isDark = false;
 
   // ── Canvas ────────────────────────────────────────────────
-  // Dark mode: ONE flat background color everywhere (a darkened
-  // derivative of the SportPesa navy-slate brand color). No more
-  // tiered background/surface/sunken layering — everything in dark
-  // mode shares this single value.
+  // Dark mode: ONE flat background color everywhere (the original
+  // navy-slate card bg — UNCHANGED). No tiered layering.
   static const Color _darkFlatBg = Color(0xFF0F1E27);
 
   static Color get background => isDark ? _darkFlatBg : const Color(0xFFFFFFFF);
@@ -107,12 +94,6 @@ class FanColors {
       isDark ? _darkFlatBg : const Color(0xFFEDF2F5);
 
   // ── Input surfaces ───────────────────────────────────────
-  // Dark mode is flat (background == surface == card bg), so a text
-  // input drawn with `surface` disappears into the card behind it.
-  // This token lifts it one notch lighter so inputs stay visually
-  // distinct without reintroducing the old tiered backgrounds.
-  // Light mode is unaffected — inputs there already contrast via
-  // the white surface + border.
   static Color get inputSurface => isDark
       ? Color.alphaBlend(Colors.white.withValues(alpha: 0.04), _darkFlatBg)
       : const Color(0xFFFFFFFF);
@@ -120,26 +101,27 @@ class FanColors {
       ? Color.alphaBlend(Colors.white.withValues(alpha: 0.015), _darkFlatBg)
       : const Color(0xFFFAFAFA);
 
+  // ── Borders (bluish → greenish) ──────────────────────────
   static Color get border =>
-      isDark ? const Color(0xFF1D3542) : const Color(0xFFDDE5EA);
+      isDark ? const Color(0xFF1D421D) : const Color(0xFFDDEADE);
   static Color get borderActive =>
-      isDark ? const Color(0xFF2E4E5E) : const Color(0xFFBFD0D9);
+      isDark ? const Color(0xFF2E5E2E) : const Color(0xFFBFD9C0);
   static Color get borderFocus =>
-      isDark ? const Color(0xFF4FA3D1) : const Color(0xFF1F4255);
+      isDark ? const Color(0xFF4FD14F) : const Color(0xFF1F551F);
 
-  // ── Primary: SportPesa navy-slate (brightened for dark canvas) ─
+  // ── Primary: green (brightened for dark canvas) ──────────
   static Color get primary =>
-      isDark ? const Color(0xFF4FA3D1) : const Color(0xFF1F4255);
+      isDark ? const Color(0xFF4FD14F) : const Color(0xFF1F551F);
   static Color get primaryDark =>
-      isDark ? const Color(0xFF2E6E96) : const Color(0xFF14303E);
+      isDark ? const Color(0xFF2E962E) : const Color(0xFF143E14);
   static Color get primaryMuted =>
-      isDark ? const Color(0xFF16303E) : const Color(0xFFE3EBEF);
+      isDark ? const Color(0xFF163E16) : const Color(0xFFE3EFE3);
   static Color get primaryDim =>
-      isDark ? const Color(0xFF102530) : const Color(0xFFF0F5F7);
+      isDark ? const Color(0xFF103010) : const Color(0xFFF0F7F0);
   static Color get primaryGlow =>
-      isDark ? const Color(0x404FA3D1) : const Color(0x221F4255);
+      isDark ? const Color(0x404FD14F) : const Color(0x221F551F);
 
-  // ── Secondary: SportPesa orange → glass amber-orange highlight in dark ─
+  // ── Secondary: warm orange (unchanged) ───────────────────
   static Color get secondary =>
       isDark ? const Color(0xFFFF7A29) : const Color(0xFFFFD9BD);
   static Color get secondaryDim =>
@@ -147,7 +129,7 @@ class FanColors {
   static Color get secondaryGlow =>
       isDark ? const Color(0x33FF7A29) : const Color(0x22FFD9BD);
 
-  // ── Gold — draw / neutral vote / jackpot energy ───────────
+  // ── Gold — draw / neutral vote / jackpot energy ──────────
   static Color get draw =>
       isDark ? const Color(0xFFFFC53D) : const Color(0xFFC79000);
   static Color get drawDim =>
@@ -155,7 +137,7 @@ class FanColors {
   static Color get drawGlow =>
       isDark ? const Color(0x40FFC53D) : const Color(0x22C79000);
 
-  // ── Red — away vote / destructive / LIVE only ─────────────
+  // ── Red — away vote / destructive / LIVE only ────────────
   static Color get away =>
       isDark ? const Color(0xFFFF5A45) : const Color(0xFFD93025);
   static Color get awayDim =>
@@ -164,13 +146,13 @@ class FanColors {
       isDark ? const Color(0x40FF5A45) : const Color(0x22D93025);
   static Color get live => away;
 
-  // ── Text hierarchy ────────────────────────────────────────
+  // ── Text hierarchy (bluish tints → greenish) ─────────────
   static Color get textPrimary =>
-      isDark ? const Color(0xFFF2F6F8) : const Color(0xFF16232B);
+      isDark ? const Color(0xFFF2F8F2) : const Color(0xFF162B16);
   static Color get textSecondary =>
-      isDark ? const Color(0xFFA9BAC4) : const Color(0xFF55707D);
+      isDark ? const Color(0xFFA9C4A9) : const Color(0xFF557D55);
   static Color get textTertiary =>
-      isDark ? const Color(0xFF6E8492) : const Color(0xFF96A8B0);
+      isDark ? const Color(0xFF6E926E) : const Color(0xFF96B096);
   static Color get textInverse =>
       const Color(0xFFFFFFFF); // always sits on a colored fill
 
@@ -331,7 +313,6 @@ class FanRadius {
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // SHADOWS — light uses soft black shadows; dark uses glow shadows
-// (a black shadow is invisible on a near-black background)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 class FanShadows {
   FanShadows._();
@@ -343,7 +324,7 @@ class FanShadows {
         ]
       : const [
           BoxShadow(
-              color: Color(0x08142430), blurRadius: 8, offset: Offset(0, 2)),
+              color: Color(0x08143024), blurRadius: 8, offset: Offset(0, 2)),
         ];
 
   static List<BoxShadow> get card => FanColors.isDark
@@ -353,7 +334,7 @@ class FanShadows {
         ]
       : const [
           BoxShadow(
-              color: Color(0x0D142430), blurRadius: 16, offset: Offset(0, 4)),
+              color: Color(0x0D143024), blurRadius: 16, offset: Offset(0, 4)),
         ];
 
   static List<BoxShadow> get elevated => FanColors.isDark
@@ -363,14 +344,14 @@ class FanShadows {
         ]
       : const [
           BoxShadow(
-              color: Color(0x14142430), blurRadius: 24, offset: Offset(0, 8)),
+              color: Color(0x14143024), blurRadius: 24, offset: Offset(0, 8)),
         ];
 
   static List<BoxShadow> get glow => [
         BoxShadow(
             color: FanColors.isDark
-                ? const Color(0x554FA3D1)
-                : const Color(0x261F4255),
+                ? const Color(0x554FD14F)
+                : const Color(0x261F551F),
             blurRadius: FanColors.isDark ? 22 : 16,
             spreadRadius: -4),
       ];
@@ -381,8 +362,8 @@ class FanShadows {
   static List<BoxShadow> get button => [
         BoxShadow(
             color: FanColors.isDark
-                ? const Color(0x554FA3D1)
-                : const Color(0x331F4255),
+                ? const Color(0x554FD14F)
+                : const Color(0x331F551F),
             blurRadius: 12,
             offset: const Offset(0, 4)),
       ];
@@ -527,17 +508,17 @@ class FanGradients {
   static LinearGradient get fire =>
       LinearGradient(colors: [FanColors.draw, FanColors.away]);
 
-  // The blue→cyan "glow" gradient — use for hero CTAs / bestseller-style
-  // badges in dark mode, same navy CTA in light. Stays in the SportPesa
-  // navy-blue family in both modes.
+  // The green "glow" gradient — hero CTAs / bestseller-style badges.
+  // Dark: #01FF01 → cyan. Light: green CTA.
   static LinearGradient get cta => FanColors.isDark
       ? const LinearGradient(
-          colors: [Color(0xFF3B82F6), Color(0xFF22D3EE)],
+          colors: [Color(0xFF01FF01), Color(0xFF22D3EE)],
           begin: Alignment.centerLeft,
           end: Alignment.centerRight,
         )
       : LinearGradient(colors: [FanColors.primary, FanColors.primaryDark]);
 
+  // Image fade — dark stop stays the original navy-slate (UNCHANGED).
   static LinearGradient get imageFade => LinearGradient(
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
@@ -547,6 +528,7 @@ class FanGradients {
         ],
       );
 
+  // Pitch overlay — dark stops stay the original navy-slate (UNCHANGED).
   static LinearGradient get pitchOverlay => LinearGradient(
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
@@ -657,8 +639,6 @@ extension VoteOutcomeX on VoteOutcome {
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // THEME — one function, reads FanColors.isDark at call time.
-// Call it again after FanTheme.controller changes to get a fresh
-// ThemeData (see MaterialApp wiring below).
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ThemeData fanFunzyTheme() {
   final scheme = FanColors.isDark
@@ -711,7 +691,7 @@ ThemeData fanFunzyTheme() {
       elevation: 0,
       scrolledUnderElevation: 1,
       shadowColor:
-          FanColors.isDark ? const Color(0x40000000) : const Color(0x14142430),
+          FanColors.isDark ? const Color(0x40000000) : const Color(0x14143024),
       surfaceTintColor: Colors.transparent,
       iconTheme: IconThemeData(color: FanColors.textPrimary),
       titleTextStyle: FanTypography.headline,
@@ -799,8 +779,4 @@ ThemeData fanFunzyTheme() {
 //       home: const MyHomePage(),
 //     ),
 //   );
-//
-// Toggle from anywhere, e.g. a settings switch:
-//   FanTheme.controller.toggle();
-//   FanTheme.controller.setDark(true);
 // ─────────────────────────────────────────────────────────────
