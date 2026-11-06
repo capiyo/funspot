@@ -40,9 +40,10 @@ class _MatchCardState extends State<MatchCard> {
 
     // Match state comes from the 365Scores-confirmed backend status.
     // Kickoff time is only used for the upcoming countdown, never LIVE.
-    if (status == 'live' || fixture.isLive) return 'LIVE';
+    if (status == 'live') return 'LIVE';
     if (status == 'soon') return 'SOON';
     if (status == 'completed' || status == 'finished') return 'FT';
+    if (status.isEmpty && fixture.isLive) return 'LIVE';
 
     final dateString = fixture.dateIso.isNotEmpty
         ? fixture.dateIso
@@ -60,8 +61,10 @@ class _MatchCardState extends State<MatchCard> {
     return '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
   }
 
-  bool get isLive =>
-      widget.fixture.status.toLowerCase() == 'live' || widget.fixture.isLive;
+  bool get isLive {
+    final status = widget.fixture.status.toLowerCase();
+    return status == 'live' || (status.isEmpty && widget.fixture.isLive);
+  }
 
   Future<void> handleBetPlacement() async {
     if (selectedBet.isEmpty || betAmountController.text.isEmpty) {
