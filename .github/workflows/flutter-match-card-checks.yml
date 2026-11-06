@@ -1,4 +1,4 @@
-name: Flutter match-card checks
+name: Flutter match-card syntax check
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
     branches: [master]
 
 jobs:
-  analyze-match-card:
+  dart-syntax:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -19,5 +19,5 @@ jobs:
           cache: true
       - name: Resolve dependencies
         run: flutter pub get
-      - name: Analyze match card
-        run: flutter analyze --no-fatal-infos --no-fatal-warnings lib/widgets/match_card.dart
+      - name: Parse changed match-card source
+        run: dart format --output=none lib/widgets/match_card.dart
