@@ -35,27 +35,33 @@ class _MatchCardState extends State<MatchCard> {
     likeCount = 20 + (DateTime.now().millisecond % 30);
   }
 
-  String formatDate(String dateString) {
-    try {
-      final date = DateTime.parse(dateString);
-      final now = DateTime.now();
-      final diffHours = date.difference(now).inHours;
+  String formatDate(Fixture fixture) {
+    final status = fixture.status.toLowerCase();
 
-      if (diffHours <= 2 && diffHours >= -2) {
-        return 'LIVE';
-      }
+    // Match state comes from the 365Scores-confirmed backend status.
+    // Kickoff time is only used for the upcoming countdown, never LIVE.
+    if (status == 'live' || fixture.isLive) return 'LIVE';
+    if (status == 'soon') return 'SOON';
+    if (status == 'completed' || status == 'finished') return 'FT';
 
-      if (date.isAfter(now)) {
-        return 'In ${diffHours}h';
-      }
+    final dateString = fixture.dateIso.isNotEmpty
+        ? fixture.dateIso
+        : '${fixture.date} ${fixture.time}'.trim();
+    final date = DateTime.tryParse(dateString);
+    if (date == null) return 'TBD';
 
-      return '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
-    } catch (e) {
-      return 'TBD';
+    final now = DateTime.now();
+    final remaining = date.difference(now);
+    if (remaining.isNegative || remaining == Duration.zero) {
+      return 'Awaiting kickoff';
     }
+    if (remaining.inMinutes < 60) return 'In ${remaining.inMinutes + 1}m';
+    if (remaining.inHours < 24) return 'In ${remaining.inHours + 1}h';
+    return '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
   }
 
-  bool get isLive => formatDate(widget.fixture.date) == 'LIVE';
+  bool get isLive =>
+      widget.fixture.status.toLowerCase() == 'live' || widget.fixture.isLive;
 
   Future<void> handleBetPlacement() async {
     if (selectedBet.isEmpty || betAmountController.text.isEmpty) {
@@ -296,7 +302,7 @@ class _MatchCardState extends State<MatchCard> {
                 ],
               ),
               Text(
-                formatDate(widget.fixture.date),
+                formatDate(widget.fixture),
                 style: TextStyle(fontSize: 10, color: Colors.grey.shade400),
               ),
             ],
