@@ -1,0 +1,23 @@
+name: Flutter match-card syntax check
+
+on:
+  push:
+    branches: [master, fix-live-status-transition]
+  pull_request:
+    branches: [master]
+
+jobs:
+  dart-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Resolve dependencies
+        run: flutter pub get
+      - name: Parse changed match-card source
+        run: dart format --output=none lib/widgets/match_card.dart
