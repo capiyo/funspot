@@ -47,7 +47,9 @@ class _MatchCardState extends State<MatchCard> {
 
     final dateString = fixture.dateIso.isNotEmpty
         ? fixture.dateIso
-        : '${fixture.date} ${fixture.time}'.trim();
+        : fixture.time.isNotEmpty
+            ? '${fixture.date}T${fixture.time}'
+            : fixture.date;
     final date = DateTime.tryParse(dateString);
     if (date == null) return 'TBD';
 
